@@ -117,7 +117,7 @@ static void testColours() {
         {"BLACK", TFT_BLACK, TFT_WHITE},
     };
     Serial.println("[3] Colour order - each screen must match its own label.");
-    Serial.println("    If RED shows blue, add -DTFT_RGB_ORDER=TFT_BGR to");
+    Serial.println("    If RED shows blue, add -DTFT_RGB_ORDER=1 to");
     Serial.println("    build_flags. If everything is inverted, -DTFT_INVERSION_ON.");
 
     for (auto& s : steps) {

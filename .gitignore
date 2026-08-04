@@ -3,3 +3,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# graphify: keep the report and graph, drop the per-file extraction cache
+graphify-out/cache/
+graphify-out/manifest.json
