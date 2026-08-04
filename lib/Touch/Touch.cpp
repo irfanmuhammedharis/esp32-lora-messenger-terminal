@@ -38,10 +38,35 @@ void Touch::restoreLcdBus() const {
     digitalWrite(PIN_LCD_CS, HIGH);
 }
 
-static uint16_t averaged(uint8_t pin) {
+// Trimmed mean: sample TOUCH_SAMPLES times, discard the single highest and
+// single lowest, average what is left.
+//
+// A plain average was the original approach and it is the wrong tool here. The
+// ESP32's ADC on a high-impedance resistive divider throws occasional wild
+// samples, and a mean carries every one of them straight into the result - a
+// single 4095 among small values moves a 3-sample mean by more than a third of
+// the panel. Throwing away both extremes removes that entire class of error
+// for the cost of two extra reads, and unlike a median it still uses most of
+// the samples, so genuine resolution is not lost.
+static_assert(TOUCH_SAMPLES >= 5,
+              "trimmed mean needs at least 5 samples to leave 3 after trimming");
+
+static uint16_t sampleAxis(uint8_t pin) {
+    uint16_t v[TOUCH_SAMPLES];
+    for (uint8_t i = 0; i < TOUCH_SAMPLES; i++) v[i] = analogRead(pin);
+
+    // Insertion sort. TOUCH_SAMPLES is tiny and fixed, so this beats anything
+    // cleverer and has no call overhead.
+    for (uint8_t i = 1; i < TOUCH_SAMPLES; i++) {
+        const uint16_t key = v[i];
+        int8_t j = static_cast<int8_t>(i) - 1;
+        while (j >= 0 && v[j] > key) { v[j + 1] = v[j]; j--; }
+        v[j + 1] = key;
+    }
+
     uint32_t acc = 0;
-    for (uint8_t i = 0; i < TOUCH_SAMPLES; i++) acc += analogRead(pin);
-    return static_cast<uint16_t>(acc / TOUCH_SAMPLES);
+    for (uint8_t i = 1; i < TOUCH_SAMPLES - 1; i++) acc += v[i];
+    return static_cast<uint16_t>(acc / (TOUCH_SAMPLES - 2));
 }
 
 bool Touch::readRaw(TouchRaw &out) {
@@ -51,7 +76,7 @@ bool Touch::readRaw(TouchRaw &out) {
     pinMode(kXP, OUTPUT); digitalWrite(kXP, HIGH);
     pinMode(kXM, OUTPUT); digitalWrite(kXM, LOW);
     delayMicroseconds(TOUCH_SETTLE_US);
-    const uint16_t x = averaged(kYP);
+    const uint16_t x = sampleAxis(kYP);
 
     // ── Y: the same, with the roles of the two sheets exchanged ────────────
     pinMode(kXP, INPUT);
@@ -59,7 +84,7 @@ bool Touch::readRaw(TouchRaw &out) {
     pinMode(kYP, OUTPUT); digitalWrite(kYP, HIGH);
     pinMode(kYM, OUTPUT); digitalWrite(kYM, LOW);
     delayMicroseconds(TOUCH_SETTLE_US);
-    const uint16_t y = averaged(kXM);
+    const uint16_t y = sampleAxis(kXM);
 
     // ── Z: how hard. Drive XP low and YM high, then measure how far the two
     // sheets have dragged each other's floating corners together. Open, they
@@ -70,8 +95,11 @@ bool Touch::readRaw(TouchRaw &out) {
     pinMode(kXM, INPUT);
     pinMode(kYP, INPUT);
     delayMicroseconds(TOUCH_SETTLE_US);
-    const int32_t z1 = analogRead(kXM);
-    const int32_t z2 = analogRead(kYP);
+    // Trimmed here too: a single spike on either plate would otherwise fake a
+    // press, and a faked press is worse than a missed one - it lands at
+    // whatever coordinate the noise produced.
+    const int32_t z1 = sampleAxis(kXM);
+    const int32_t z2 = sampleAxis(kYP);
     int32_t z = TOUCH_ADC_MAX - (z2 - z1);
     if (z < 0) z = 0;
     if (z > TOUCH_ADC_MAX) z = TOUCH_ADC_MAX;

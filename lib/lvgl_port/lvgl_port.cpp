@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "app_config.h"
+
 // Prove include/lv_conf.h is actually the config in force.
 //
 // LVGL falls back to a full set of built-in defaults if it cannot find
@@ -135,22 +137,84 @@ static lv_indev_t *s_indev = nullptr;
 static uint32_t s_lastTouchMs = 0;
 static bool     s_swallow     = false;
 
-static void touchReadCb(lv_indev_t *, lv_indev_data_t *data) {
-    static int32_t lastX = 0, lastY = 0;
+// ── Press confirmation and smoothing ────────────────────────────────────────
+//
+// Nothing is reported to LVGL until TOUCH_CONFIRM_READS consecutive reads
+// agree within TOUCH_JITTER_PX of each other. This is what stops wrong taps.
+//
+// The reason it is needed: the first reading after contact is always the
+// worst one. The two sheets are still settling, contact resistance is still
+// falling, and the coordinate it produces can be anywhere on the panel. Report
+// that sample and LVGL activates whatever widget it happened to land on -
+// which is indistinguishable, from the operator's side, from the UI being
+// wired up wrong. Holding fire for one extra poll (~30 ms, imperceptible)
+// throws that sample away before it can do damage.
+//
+// Release is debounced the other way: a resistive sheet loses contact briefly
+// mid-press, especially near the edges, and without TOUCH_RELEASE_READS a
+// single dropout splits one tap into two or ends a drag halfway.
+static int32_t s_x = 0, s_y = 0;        // reported coordinate (smoothed)
+static int32_t s_candX = 0, s_candY = 0; // candidate being confirmed
+static uint8_t s_confirm  = 0;
+static uint8_t s_released = 0;
+static bool    s_pressed  = false;       // currently reporting PRESSED
 
+static void touchReadCb(lv_indev_t *, lv_indev_data_t *data) {
     int32_t x, y;
-    if (s_touch->read(lv_display_get_horizontal_resolution(nullptr),
-                      lv_display_get_vertical_resolution(nullptr), x, y)) {
-        lastX = x;
-        lastY = y;
+    const bool raw = s_touch->read(lv_display_get_horizontal_resolution(nullptr),
+                                   lv_display_get_vertical_resolution(nullptr),
+                                   x, y);
+
+    if (raw) {
+        // Activity is recorded on the RAW read, before confirmation, so the
+        // idle-blank timer wakes on the very first contact even though that
+        // sample is never reported as a press.
         s_lastTouchMs = millis();
-        data->state = s_swallow ? LV_INDEV_STATE_RELEASED
-                                : LV_INDEV_STATE_PRESSED;
+        s_released = 0;
+
+        if (s_pressed) {
+            // Exponential smoothing while held. Flattens the wander a bare
+            // finger produces, which is what would otherwise cross LVGL's
+            // scroll threshold and turn a tap into a swallowed drag.
+            s_x = (x + (TOUCH_SMOOTHING_DEN - 1) * s_x) / TOUCH_SMOOTHING_DEN;
+            s_y = (y + (TOUCH_SMOOTHING_DEN - 1) * s_y) / TOUCH_SMOOTHING_DEN;
+        } else if (s_confirm == 0) {
+            s_candX = x;
+            s_candY = y;
+            s_confirm = 1;
+        } else if (abs(x - s_candX) <= TOUCH_JITTER_PX &&
+                   abs(y - s_candY) <= TOUCH_JITTER_PX) {
+            s_candX = (s_candX + x) / 2;
+            s_candY = (s_candY + y) / 2;
+            if (++s_confirm >= TOUCH_CONFIRM_READS) {
+                s_pressed = true;
+                s_x = s_candX;
+                s_y = s_candY;
+            }
+        } else {
+            // Too far from the candidate to be the same contact. Start over
+            // rather than averaging two unrelated points into a third that
+            // matches neither - the classic way a filter invents a tap
+            // halfway between two real ones.
+            s_candX = x;
+            s_candY = y;
+            s_confirm = 1;
+        }
     } else {
-        data->state = LV_INDEV_STATE_RELEASED;
+        s_confirm = 0;
+        if (s_pressed && ++s_released >= TOUCH_RELEASE_READS) {
+            s_pressed  = false;
+            s_released = 0;
+        }
     }
-    data->point.x = lastX;
-    data->point.y = lastY;
+
+    data->state = (s_pressed && !s_swallow) ? LV_INDEV_STATE_PRESSED
+                                            : LV_INDEV_STATE_RELEASED;
+    // On release LVGL must still see the last known point. Reporting (0,0)
+    // would make every lift-off look like a drag to the top-left corner,
+    // cancelling taps and throwing scrolls the wrong way.
+    data->point.x = s_x;
+    data->point.y = s_y;
 }
 
 uint32_t lvglPortLastTouchMs() { return s_lastTouchMs; }
@@ -168,11 +232,11 @@ bool lvglPortInitTouch(Touch &touch) {
     lv_indev_set_read_cb(s_indev, touchReadCb);
     lv_indev_set_display(s_indev, s_disp);
 
-    // A resistive sheet read through an ADC is noisy, and a bare finger on
-    // glass wanders. The default 10 px scroll threshold turns that jitter into
-    // accidental scrolls that swallow taps; 18 px is enough to keep a
-    // deliberate drag feeling immediate while a shaky tap stays a tap.
-    lv_indev_set_scroll_limit(s_indev, 18);
+    // The default 10 px scroll threshold turns finger wander into accidental
+    // scrolls that swallow taps. The smoothing in touchReadCb() already
+    // removes most of that, but this stays generous: a tap misread as a drag
+    // is silently discarded, which is the worse of the two failure modes.
+    lv_indev_set_scroll_limit(s_indev, TOUCH_SCROLL_LIMIT_PX);
 
     return true;
 }

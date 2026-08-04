@@ -45,8 +45,48 @@
 // four corners and measuring the voltage the divider produces at a third.
 // There is no controller to debounce or calibrate for us.
 #define TOUCH_ADC_MAX        4095   // 12-bit ESP32 ADC
-#define TOUCH_SAMPLES        3      // averaged per axis per read
-#define TOUCH_SETTLE_US      200    // after switching pin modes, before the ADC
+
+// Raw ADC reads per axis. These are combined with a TRIMMED MEAN - the
+// highest and lowest are thrown away and the rest averaged - not a plain
+// average. That distinction is the whole point: a plain mean of 3 lets one
+// spike drag the result a long way, and on a resistive sheet read through the
+// ESP32's ADC, spikes are the normal case rather than the exception. Discarding
+// the extremes costs two samples and removes that entire failure mode.
+// Must be >= 5 for the trim to leave anything behind.
+#define TOUCH_SAMPLES        5
+
+// Settle time after switching pin modes, before sampling. The sheet is a
+// resistor-capacitor network and the ADC input has its own sampling cap;
+// reading too early gives a value part-way through the transition, which
+// looks exactly like a finger somewhere it is not.
+#define TOUCH_SETTLE_US      300
+
+// ── Press confirmation (this is what stops wrong taps) ──────────────────────
+// A press is not reported to LVGL until this many consecutive reads agree
+// within TOUCH_JITTER_PX. Until then nothing is sent at all, so the noisy
+// first sample after contact - always the worst one, while the two sheets are
+// still settling - can never become a tap at the wrong widget.
+// Cost is one extra LVGL poll of latency, about 30 ms. Not perceptible.
+#define TOUCH_CONFIRM_READS  2
+#define TOUCH_JITTER_PX      12
+
+// Consecutive open reads before a release is reported. A resistive panel
+// drops contact briefly mid-press, especially near the edges; without this a
+// single dropout splits one tap into two, or ends a drag halfway.
+#define TOUCH_RELEASE_READS  2
+
+// Exponential smoothing on the reported coordinate while pressed:
+//     new = (raw + (DEN-1) * previous) / DEN
+// DEN of 3 keeps a drag feeling immediate while flattening the wander that
+// would otherwise cross the scroll threshold and swallow a tap.
+#define TOUCH_SMOOTHING_DEN  3
+
+// How far a finger must travel before LVGL calls it a scroll rather than a
+// tap. LVGL's default is 10 px, which a bare finger on glass exceeds without
+// moving. With the filtering above the reported point is far steadier, but
+// this stays generous - a tap wrongly read as a drag is silently swallowed,
+// which is the worse of the two failures.
+#define TOUCH_SCROLL_LIMIT_PX 24
 
 // Pressure below this counts as "not touched". The plates read near zero when
 // open, so this mostly rejects noise; Stage 2's raw phase prints live values
