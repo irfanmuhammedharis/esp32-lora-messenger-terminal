@@ -63,6 +63,7 @@ pio run -e t2_touch   -t upload   # touch: raw readout, calibration, verify
 pio run -e t3_touchui -t upload   # touch as an LVGL input device
 pio run -e t4_uart    -t upload   # UART link to the nRF52840
 pio run -e t5_ui      -t upload   # the whole UI on mock data, no radio
+pio run -e t6_touchdiag -t upload # self-scoring touch diagnostic suite
 pio test -e native                # protocol/logic tests, on the host
 pio run -e app        -t upload   # the integrated application
 ```

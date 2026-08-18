@@ -1,18 +1,12 @@
-# Graph Report - esp32loralcd  (2026-08-04)
+# Graph Report - .  (2026-08-04)
 
 ## Corpus Check
-- 30 files · ~34,115 words
-- Verdict: corpus is large enough that graph structure adds value.
+- Corpus is ~33,043 words - fits in a single context window. You may not need a graph.
 
 ## Summary
-- 451 nodes · 888 edges · 24 communities (16 shown, 8 thin omitted)
-- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 73 edges (avg confidence: 0.83)
-- Token cost: 0 input · 0 output
-
-## Graph Freshness
-- Built from commit: `9ca5a574`
-- Run `git rev-parse HEAD` and compare to check if the graph is stale.
-- Run `graphify update .` after code changes (no API cost).
+- 422 nodes · 860 edges · 22 communities (15 shown, 7 thin omitted)
+- Extraction: 91% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 73 edges (avg confidence: 0.83)
+- Token cost: 310,951 input · 0 output
 
 ## Community Hubs (Navigation)
 - [[_COMMUNITY_nRF Link Protocol and UART Stage|nRF Link Protocol and UART Stage]]
@@ -33,8 +27,6 @@
 - [[_COMMUNITY_LCD Reset Pin|LCD Reset Pin]]
 - [[_COMMUNITY_LCD Write Strobe Pin|LCD Write Strobe Pin]]
 - [[_COMMUNITY_Stage 0 Scaffolding|Stage 0 Scaffolding]]
-- [[_COMMUNITY_Community 22|Community 22]]
-- [[_COMMUNITY_Community 23|Community 23]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `show()` - 18 edges
@@ -57,8 +49,8 @@
   src/main.cpp → PLAN.md
 - `mockGenerator()` --semantically_similar_to--> `onLinkEvent()`  [INFERRED] [semantically similar]
   test_apps/t5_ui.cpp → src/main.cpp
-- `test_index_zero_is_newest()` --conceptually_related_to--> `Inbox Screen (home)`  [INFERRED]
-  test/test_logic_store/test_store.cpp → PLAN.md
+- `realSend()` --implements--> `ESP32 to nRF Outgoing Line Protocol`  [INFERRED]
+  src/main.cpp → PLAN.md
 
 ## Import Cycles
 - None detected.
@@ -71,55 +63,51 @@
 - **Touch-Only Input and Its Compensations** — plan_touch_only_input, plan_phantom_press_incident, plan_r4d, plan_r4e, plan_calibration_is_boot_path, plan_sos_everywhere [EXTRACTED 1.00]
 - **32-Byte Payload Cap Propagating Through the Whole Stack** — reference_nrf_max_payload_len, plan_max_payload_len_cap, plan_r2, plan_screen_compose, test_logic_link_test_link_test_text_truncated_to_msg_max_len, test_logic_store_test_store_test_all_presets_fit [INFERRED 0.85]
 
-## Communities (24 total, 8 thin omitted)
+## Communities (22 total, 7 thin omitted)
 
 ### Community 0 - "nRF Link Protocol and UART Stage"
 Cohesion: 0.07
 Nodes (53): Beacon Filtering Into the Status Screen, Path A — Parse the Zephyr Log Line, Path B — Machine-Readable +RX/+TX Line, R1 — nRF Console on USB CDC, R5 — Zephyr Log Lines Dropped in Deferred Mode, R7 — No Delivery Guarantee (Fire-and-Forget Mesh), Stage 4 — UART Link to the nRF (env t4_uart), Required Zephyr-Side Console Configuration (+45 more)
 
 ### Community 1 - "UI Screens and Message Data"
-Cohesion: 0.09
-Nodes (56): kPresetCount, kPresetMessages, MSG_HISTORY_LEN, MSG_MAX_LEN (32-char radio payload cap), PRESET_SOS_INDEX, Montserrat 14/16/20/28 font set, Widget trimming to shrink flash and API surface, lv_event_t (+48 more)
+Cohesion: 0.10
+Nodes (52): kPresetCount, kPresetMessages, MSG_HISTORY_LEN, PRESET_SOS_INDEX, Montserrat 14/16/20/28 font set, Widget trimming to shrink flash and API surface, Message, lv_event_t (+44 more)
 
 ### Community 2 - "LVGL Port and Display Config"
-Cohesion: 0.05
-Nodes (63): LV_COLOR_DEPTH 16 (RGB565 render format), LV_USE_OS LV_OS_NONE (pumped from loop), TFT_eSPI, Per-call UART drain budget protects lv_timer_handler, lv_area_t, lv_display_t, flushCb(), Only lvgl_port knows about TFT_eSPI and the parallel bus (+55 more)
+Cohesion: 0.07
+Nodes (47): SCREEN_BLANK_AFTER_MS (light discipline), LV_COLOR_DEPTH 16 (RGB565 render format), Dark theme (night light discipline), LV_USE_OS LV_OS_NONE (pumped from loop), Backlight hardwired, no control GPIO, TFT_eSPI, Per-call UART drain budget protects lv_timer_handler, lv_area_t (+39 more)
 
 ### Community 3 - "LoraLink Parser and TX Queue"
-Cohesion: 0.14
-Nodes (26): NRF_LINE_MAX, NRF_LINK_TIMEOUT_MS (3 missed beacons), NRF_TX_GAP_MS (inter-line spacing), NRF_TXQ_LEN (bounded TX queue depth), PIN_NRF_RX (GPIO16), PIN_NRF_TX (GPIO17), LinkEvent, begin() (+18 more)
+Cohesion: 0.08
+Nodes (40): MSG_MAX_LEN (32-char radio payload cap), NRF_LINE_MAX, NRF_LINK_TIMEOUT_MS (3 missed beacons), NRF_TX_GAP_MS (inter-line spacing), NRF_TXQ_LEN (bounded TX queue depth), PIN_NRF_RX (GPIO16), PIN_NRF_TX (GPIO17), LinkEvent (+32 more)
 
 ### Community 4 - "Touch Hardware and Calibration Storage"
-Cohesion: 0.09
-Nodes (40): TOUCH_ADC_MAX, TOUCH_CAL_VERSION (embeds rotation), TOUCH_NVS_KEY, TOUCH_NVS_NAMESPACE, TOUCH_SETTLE_US, TOUCH_Z_THRESHOLD, ADC2 unusable with WiFi; device never runs WiFi, PIN_LCD_CS (GPIO26) (+32 more)
+Cohesion: 0.08
+Nodes (44): TOUCH_ADC_MAX, TOUCH_CAL_VERSION (embeds rotation), TOUCH_NVS_KEY, TOUCH_NVS_NAMESPACE, TOUCH_SAMPLES, TOUCH_SETTLE_US, TOUCH_Z_THRESHOLD, ADC2 unusable with WiFi; device never runs WiFi (+36 more)
 
 ### Community 5 - "Touch-Only Input Risks"
-Cohesion: 0.06
-Nodes (34): 1. System overview, 2.1 Orientation, 2.2 Touch, 2. Hardware / pin map, 3.1 ESP32 → nRF (outgoing messages) — works today, no firmware change, 3.2 nRF → ESP32 (incoming messages) — needs a decision, 3.3 Required Zephyr-side configuration, 3. The ESP32 ↔ nRF52840 link protocol (+26 more)
+Cohesion: 0.08
+Nodes (35): MessageStore, A Failed Calibration Boots Into Calibration, Floating GPIO34 Fired an Unasked-For Panic SOS, R4 — Touch Shares Four LCD Lines and Has No Controller, R4d — Touch Is a Single Point of Failure, R4e — No Out-of-Band Panic Path, Status Screen, SOS Reachable in One Tap From Every Screen (+27 more)
 
 ### Community 6 - "Architecture and Payload Cap"
 Cohesion: 0.08
-Nodes (27): MessageStore, 32-Byte Payload Cap (MAX_PAYLOAD_LEN), ESP32 to nRF Outgoing Line Protocol, Presets as a Scrolling List, Not a Button Matrix, R2 — 32-Byte Payload Cap Silently Truncates, Compose Screen, Detail Screen, Inbox Screen (home) (+19 more)
+Nodes (26): PLAN.md — LoRa Messenger Terminal Build Plan, Arduino-Free Logic Layer, Division of Labour — ESP32 Owns Nothing Radio-Shaped, 32-Byte Payload Cap (MAX_PAYLOAD_LEN), ESP32 to nRF Outgoing Line Protocol, Presets as a Scrolling List, Not a Button Matrix, R2 — 32-Byte Payload Cap Silently Truncates, Compose Screen (+18 more)
 
 ### Community 7 - "Display Controller Findings"
 Cohesion: 0.13
-Nodes (27): The Pin Assignment Is Forced, Not Chosen, Finding — The Controller Is an ILI9342, Not an ILI9341, R4c — ADC2 Unavailable While WiFi Is Active, R6 — 3.3 V Regulator Sag With the TFT at Full Brightness, Stage 1b — TFT Display Bring-Up (env t1_display), Finding — The Panel Is RGB-Ordered, Not BGR, reportResetReason(), loop() (+19 more)
+Nodes (27): The Pin Assignment Is Forced, Not Chosen, Finding — The Controller Is an ILI9342, Not an ILI9341, Portrait 240x320 Is TFT_ROTATION 1, R4c — ADC2 Unavailable While WiFi Is Active, R6 — 3.3 V Regulator Sag With the TFT at Full Brightness, Stage 1b — TFT Display Bring-Up (env t1_display), Finding — The Panel Is RGB-Ordered, Not BGR, loop() (+19 more)
 
 ### Community 8 - "Controller Identification (Stage 1a)"
 Cohesion: 0.16
 Nodes (26): Only Geometry Identifies a Controller, Stage 1a Finding — This Panel Answers No ID Register, R3 — Unknown LCD Controller, R4b — Shield Regulator Fed From Its 5V Pin, Stage 1a — Identify the LCD Controller (env t1a_lcdid), busBegin(), busIsFloating(), dataAsInput() (+18 more)
 
 ### Community 9 - "Touch Interaction Rules"
-Cohesion: 0.11
-Nodes (23): SCREEN_BLANK_AFTER_MS (light discipline), UI_MIN_TOUCH_PX (40 px touch-target floor), Dark theme (night light discipline), Push buttons removed (floating GPIO34/35 fired a phantom SOS), Backlight hardwired, no control GPIO, Touch, lv_indev_data_t, lv_indev_t (+15 more)
+Cohesion: 0.21
+Nodes (13): UI_MIN_TOUCH_PX (40 px touch-target floor), Push buttons removed (floating GPIO34/35 fired a phantom SOS), Touch, lvglPortInitTouch(), One pointer indev, no keypad and no lv_group_t, 18 px scroll limit absorbs resistive-panel jitter, Calibration is a boot path, not a bring-up step (risk R4d), kFooterH (48 px action bar) (+5 more)
 
 ### Community 10 - "Build-Time Guards and Memory Budget"
 Cohesion: 0.22
 Nodes (9): TFT_ROTATION (ILI9342 inverted numbering), LV_DPI_DEF 167, LV_MEM_SIZE (48 KB LVGL pool), pins.h vs platformio.ini drift guards, GPIO < 32 constraint for the parallel bus, static_asserts proving lv_conf.h is in force, LVGL_BUF_LINES (40-scanline strip buffer), kInboxMaxRows (16 rows, bounded by LV_MEM_SIZE) (+1 more)
-
-### Community 22 - "Community 22"
-Cohesion: 0.17
-Nodes (13): class, Message, class, LinkEvent, LinkEventType(), LoraLink(), LoraLinkParser(), Parser is Arduino-free so it runs under pio test -e native (+5 more)
 
 ## Ambiguous Edges - Review These
 - `readRaw()` → `TOUCH_Z_THRESHOLD`  [AMBIGUOUS]
@@ -128,9 +116,9 @@ Nodes (13): class, Message, class, LinkEvent, LinkEventType(), LoraLink(), LoraL
   lib/lvgl_port/lvgl_port.cpp · relation: shares_data_with
 
 ## Knowledge Gaps
-- **73 isolated node(s):** `class`, `class`, `TouchRaw`, `namespace`, `lv_font_t` (+68 more)
+- **50 isolated node(s):** `class`, `class`, `TouchRaw`, `namespace`, `lv_font_t` (+45 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **8 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **7 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
@@ -139,13 +127,13 @@ _Questions this graph is uniquely positioned to answer:_
   _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
 - **What is the exact relationship between `lvglPortInit()` and `touchReadCb()`?**
   _Edge tagged AMBIGUOUS (relation: shares_data_with) - confidence is low._
-- **Why does `MessageStore` connect `Architecture and Payload Cap` to `nRF Link Protocol and UART Stage`, `UI Screens and Message Data`?**
-  _High betweenness centrality (0.228) - this node is a cross-community bridge._
-- **Why does `begin()` connect `UI Screens and Message Data` to `Architecture and Payload Cap`?**
-  _High betweenness centrality (0.196) - this node is a cross-community bridge._
-- **Why does `TouchCal` connect `Architecture and Payload Cap` to `LVGL Port and Display Config`, `Touch Hardware and Calibration Storage`?**
-  _High betweenness centrality (0.098) - this node is a cross-community bridge._
+- **Why does `MessageStore` connect `Touch-Only Input Risks` to `nRF Link Protocol and UART Stage`, `UI Screens and Message Data`, `Architecture and Payload Cap`?**
+  _High betweenness centrality (0.221) - this node is a cross-community bridge._
+- **Why does `begin()` connect `UI Screens and Message Data` to `Touch-Only Input Risks`?**
+  _High betweenness centrality (0.188) - this node is a cross-community bridge._
+- **Why does `TouchCal` connect `Touch Hardware and Calibration Storage` to `Touch-Only Input Risks`?**
+  _High betweenness centrality (0.105) - this node is a cross-community bridge._
 - **What connects `class`, `class`, `TouchRaw` to the rest of the system?**
-  _83 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _60 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `nRF Link Protocol and UART Stage` be split into smaller, more focused modules?**
   _Cohesion score 0.06896551724137931 - nodes in this community are weakly interconnected._

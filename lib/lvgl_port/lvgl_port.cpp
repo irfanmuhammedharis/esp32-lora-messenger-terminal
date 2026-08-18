@@ -139,22 +139,26 @@ static bool     s_swallow     = false;
 
 // ── Press confirmation and smoothing ────────────────────────────────────────
 //
-// Nothing is reported to LVGL until TOUCH_CONFIRM_READS consecutive reads
-// agree within TOUCH_JITTER_PX of each other. This is what stops wrong taps.
+// A press is reported once TOUCH_CONFIRM_READS consecutive calibrated reads
+// return true. The jitter check that was here has been deliberately removed
+// (commit "claude 1 need to refine touch"): requiring the coordinate to stay
+// within 12 px of the first sample during confirmation meant that a moving
+// finger — the normal case for a drag — restarted confirmation on every
+// single poll, so taps during motion never registered. It was the right idea
+// for a noisy first-contact sample but the wrong tool: the trimmed mean in
+// readRaw() already discards single-sample spikes, and the z-threshold gates
+// open-panel noise, so the coordinate of the first read that passes the
+// pressure check is already stable enough for a 240×320 panel.
 //
-// The reason it is needed: the first reading after contact is always the
-// worst one. The two sheets are still settling, contact resistance is still
-// falling, and the coordinate it produces can be anywhere on the panel. Report
-// that sample and LVGL activates whatever widget it happened to land on -
-// which is indistinguishable, from the operator's side, from the UI being
-// wired up wrong. Holding fire for one extra poll (~30 ms, imperceptible)
-// throws that sample away before it can do damage.
+// The confirming reads still discard the first sample implicitly: the last
+// read before the count hits TOUCH_CONFIRM_READS is the most settled one,
+// and THAT coordinate becomes the press position. TOUCH_CONFIRM_READS=2
+// costs one extra poll cycle (~33 ms) and removes the failure mode.
 //
-// Release is debounced the other way: a resistive sheet loses contact briefly
+// Release is debounced the other way: a resistive sheet drops contact briefly
 // mid-press, especially near the edges, and without TOUCH_RELEASE_READS a
 // single dropout splits one tap into two or ends a drag halfway.
 static int32_t s_x = 0, s_y = 0;        // reported coordinate (smoothed)
-static int32_t s_candX = 0, s_candY = 0; // candidate being confirmed
 static uint8_t s_confirm  = 0;
 static uint8_t s_released = 0;
 static bool    s_pressed  = false;       // currently reporting PRESSED
@@ -178,27 +182,15 @@ static void touchReadCb(lv_indev_t *, lv_indev_data_t *data) {
             // scroll threshold and turn a tap into a swallowed drag.
             s_x = (x + (TOUCH_SMOOTHING_DEN - 1) * s_x) / TOUCH_SMOOTHING_DEN;
             s_y = (y + (TOUCH_SMOOTHING_DEN - 1) * s_y) / TOUCH_SMOOTHING_DEN;
-        } else if (s_confirm == 0) {
-            s_candX = x;
-            s_candY = y;
-            s_confirm = 1;
-        } else if (abs(x - s_candX) <= TOUCH_JITTER_PX &&
-                   abs(y - s_candY) <= TOUCH_JITTER_PX) {
-            s_candX = (s_candX + x) / 2;
-            s_candY = (s_candY + y) / 2;
-            if (++s_confirm >= TOUCH_CONFIRM_READS) {
-                s_pressed = true;
-                s_x = s_candX;
-                s_y = s_candY;
-            }
-        } else {
-            // Too far from the candidate to be the same contact. Start over
-            // rather than averaging two unrelated points into a third that
-            // matches neither - the classic way a filter invents a tap
-            // halfway between two real ones.
-            s_candX = x;
-            s_candY = y;
-            s_confirm = 1;
+        } else if (++s_confirm >= TOUCH_CONFIRM_READS) {
+            // Confirmed. The last confirming sample — the most settled after
+            // initial contact — becomes the press position. The first few
+            // confirming samples are discarded by construction: only the
+            // final one sets s_x/s_y, and it has had TOUCH_CONFIRM_READS
+            // polls of contact settling behind it.
+            s_pressed = true;
+            s_x = x;
+            s_y = y;
         }
     } else {
         s_confirm = 0;

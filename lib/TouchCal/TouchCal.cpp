@@ -93,6 +93,34 @@ bool run(TFT_eSPI &tft, Touch &touch) {
     awaitStableTap(tft, touch, w - 1 - kInset, h - 1 - kInset, "BOTTOM-RIGHT", br);
     awaitStableTap(tft, touch, kInset,         h - 1 - kInset, "BOTTOM-LEFT", bl);
 
+    // Axis cross-check BEFORE trusting the solve. The top edge (TL->TR, only
+    // screen X varies) and the left edge (TL->BL, only screen Y varies) must
+    // both identify the same orientation. A disagreement means at least one
+    // of the four taps was sloppy - saving that would map taps to the wrong
+    // place (the exact fault this fix is for) even though the solved ranges
+    // look plausible. Reject and let the user retry rather than persist it.
+    {
+        const int32_t dxTop  = abs((int32_t)tr.x - (int32_t)tl.x);
+        const int32_t dyTop  = abs((int32_t)tr.y - (int32_t)tl.y);
+        const int32_t dxLeft = abs((int32_t)bl.x - (int32_t)tl.x);
+        const int32_t dyLeft = abs((int32_t)bl.y - (int32_t)tl.y);
+        const bool swapTop  = dyTop > dxTop;
+        const bool swapLeft = dxLeft > dyLeft;
+        if (swapTop != swapLeft) {
+            Serial.printf("    REJECTED: axis evidence disagrees (top %s,"
+                          " left %s)\n", swapTop ? "swapped" : "normal",
+                          swapLeft ? "swapped" : "normal");
+            Serial.println("    Tap all four targets more squarely, then retry.");
+            tft.fillScreen(TFT_RED);
+            tft.setTextColor(TFT_WHITE, TFT_RED);
+            tft.setTextDatum(MC_DATUM);
+            tft.drawString("TAPS OFF - RETRY", w / 2, h / 2, 4);
+            tft.setTextDatum(TL_DATUM);
+            delay(2000);
+            return false;
+        }
+    }
+
     const TouchCal c = Touch::solve(tl, tr, br, bl, kInset, w, h);
 
     // Sanity check before trusting it. A span this small means the four taps

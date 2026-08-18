@@ -1,0 +1,152 @@
+{
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/.vscode/extensions.json": {
+    "mtime": 1785835940.0634463,
+    "ast_hash": "90f13aaa6d970e2869f11ed92ffbc61a",
+    "semantic_hash": "90f13aaa6d970e2869f11ed92ffbc61a"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/include/app_config.h": {
+    "mtime": 1785835640.279424,
+    "ast_hash": "b100fd3c7bf6b1ca9a38899d8d54b80c",
+    "semantic_hash": "b100fd3c7bf6b1ca9a38899d8d54b80c"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/include/lv_conf.h": {
+    "mtime": 1785834863.3868432,
+    "ast_hash": "c8fcd06500f6778fe56228d60bed4f72",
+    "semantic_hash": "c8fcd06500f6778fe56228d60bed4f72"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/include/pins.h": {
+    "mtime": 1785835627.287428,
+    "ast_hash": "28c26a4cc122e800e43cc3b0ce09d09f",
+    "semantic_hash": "28c26a4cc122e800e43cc3b0ce09d09f"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/lib/LoraLink/LoraLink.cpp": {
+    "mtime": 1785833324.565257,
+    "ast_hash": "a1bafe37bc97a66ca89c5a1e5cee737a",
+    "semantic_hash": "a1bafe37bc97a66ca89c5a1e5cee737a"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/lib/LoraLink/LoraLink.h": {
+    "mtime": 1785833346.1349492,
+    "ast_hash": "106f4f0746409ee33cf8fdbf1f4d2eff",
+    "semantic_hash": "106f4f0746409ee33cf8fdbf1f4d2eff"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/lib/MessageStore/MessageStore.cpp": {
+    "mtime": 1785832933.0594385,
+    "ast_hash": "2c0304e2dfbfeac77e43c9bd83097b7c",
+    "semantic_hash": "2c0304e2dfbfeac77e43c9bd83097b7c"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/lib/MessageStore/MessageStore.h": {
+    "mtime": 1785832916.8972628,
+    "ast_hash": "c01de93de8b6bd443877d7d371ab4196",
+    "semantic_hash": "c01de93de8b6bd443877d7d371ab4196"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/lib/Touch/Touch.cpp": {
+    "mtime": 1785757646.461097,
+    "ast_hash": "fe8f4e9fc5a6536539427022929c9153",
+    "semantic_hash": "fe8f4e9fc5a6536539427022929c9153"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/lib/Touch/Touch.h": {
+    "mtime": 1785757556.3836434,
+    "ast_hash": "8b4b4381567623b70e1cf8ef87d48ac4",
+    "semantic_hash": "8b4b4381567623b70e1cf8ef87d48ac4"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/lib/TouchCal/TouchCal.cpp": {
+    "mtime": 1785835695.6151915,
+    "ast_hash": "a3f55b33d8dc2f327ce5eaa2a81dee04",
+    "semantic_hash": "a3f55b33d8dc2f327ce5eaa2a81dee04"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/lib/TouchCal/TouchCal.h": {
+    "mtime": 1785835695.6136081,
+    "ast_hash": "d3b72da3662c1f8b2018e9220c1e3991",
+    "semantic_hash": "d3b72da3662c1f8b2018e9220c1e3991"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/lib/UI/UI.cpp": {
+    "mtime": 1785836592.6489158,
+    "ast_hash": "7ea3d72324e1fce1ab5a30f166e007bc",
+    "semantic_hash": "7ea3d72324e1fce1ab5a30f166e007bc"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/lib/UI/UI.h": {
+    "mtime": 1785835748.1609666,
+    "ast_hash": "3a62acc9386b7cb6110bedd2de4c4e30",
+    "semantic_hash": "3a62acc9386b7cb6110bedd2de4c4e30"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/lib/lvgl_port/lvgl_port.cpp": {
+    "mtime": 1785835845.6153457,
+    "ast_hash": "35e296cffe322652752a9503cec26ec6",
+    "semantic_hash": "35e296cffe322652752a9503cec26ec6"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/lib/lvgl_port/lvgl_port.h": {
+    "mtime": 1785836149.8762631,
+    "ast_hash": "d8e8a565ef3a1d39f7f7b75bcf1fd486",
+    "semantic_hash": "d8e8a565ef3a1d39f7f7b75bcf1fd486"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/reference/nrf.cpp": {
+    "mtime": 1785750893.6039994,
+    "ast_hash": "b888215c1354aa96e9c40e80e75afa6e",
+    "semantic_hash": "b888215c1354aa96e9c40e80e75afa6e"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/src/main.cpp": {
+    "mtime": 1785835873.9215717,
+    "ast_hash": "9363983961511f512e685d3c77d0ff2f",
+    "semantic_hash": "9363983961511f512e685d3c77d0ff2f"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/test/test_logic_link/test_link.cpp": {
+    "mtime": 1785833150.69512,
+    "ast_hash": "2d327c27eb2737cbdbb74185aa3e0047",
+    "semantic_hash": "2d327c27eb2737cbdbb74185aa3e0047"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/test/test_logic_store/test_store.cpp": {
+    "mtime": 1785833342.954448,
+    "ast_hash": "ab6a3bc65265528c9041f22673f512bc",
+    "semantic_hash": "ab6a3bc65265528c9041f22673f512bc"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/test_apps/t1_display.cpp": {
+    "mtime": 1785834318.8339906,
+    "ast_hash": "8f49bb6e572557977fd9c29e694b7b29",
+    "semantic_hash": "8f49bb6e572557977fd9c29e694b7b29"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/test_apps/t1a_lcd_id.cpp": {
+    "mtime": 1785834313.1254885,
+    "ast_hash": "688a31558aef3f9c25d3dcf90d6df9c7",
+    "semantic_hash": "688a31558aef3f9c25d3dcf90d6df9c7"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/test_apps/t1c_lvgl.cpp": {
+    "mtime": 1785832547.6042507,
+    "ast_hash": "2392efc820d853cfbae33789393738b8",
+    "semantic_hash": "2392efc820d853cfbae33789393738b8"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/test_apps/t2_touch.cpp": {
+    "mtime": 1785835873.9391215,
+    "ast_hash": "f1fb7bca6d3505cdabbdc46bad8684ec",
+    "semantic_hash": "f1fb7bca6d3505cdabbdc46bad8684ec"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/test_apps/t3_touchui.cpp": {
+    "mtime": 1785835913.350797,
+    "ast_hash": "3247ce0488be312694b43dd8ff6c28d6",
+    "semantic_hash": "3247ce0488be312694b43dd8ff6c28d6"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/test_apps/t4_uart.cpp": {
+    "mtime": 1785834639.9877508,
+    "ast_hash": "1d690ec3607042b9537e987530ad17be",
+    "semantic_hash": "1d690ec3607042b9537e987530ad17be"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/test_apps/t5_ui.cpp": {
+    "mtime": 1785835811.3923004,
+    "ast_hash": "4dc547140cab9701892fedf9638e9185",
+    "semantic_hash": "4dc547140cab9701892fedf9638e9185"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/PLAN.md": {
+    "mtime": 1785836376.0895755,
+    "ast_hash": "04e964901efd20108cae5ed0235c2b26",
+    "semantic_hash": "04e964901efd20108cae5ed0235c2b26"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/README.md": {
+    "mtime": 1785837476.2134194,
+    "ast_hash": "8211855105996df4819f86502b2c95f7",
+    "semantic_hash": "8211855105996df4819f86502b2c95f7"
+  },
+  "/home/irfan/Documents/PlatformIO/Projects/esp32loralcd/WIRING.md": {
+    "mtime": 1785836376.1031606,
+    "ast_hash": "7a4cb9452b9d53683a0a095b40271533",
+    "semantic_hash": "7a4cb9452b9d53683a0a095b40271533"
+  }
+}

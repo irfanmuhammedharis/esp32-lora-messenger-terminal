@@ -96,9 +96,14 @@
 // A saved calibration is only valid for the rotation it was taken in, so the
 // stored version embeds it - rotating the display makes the old data fail to
 // load rather than silently mapping taps to the wrong place.
+//
+// Bump the 0x5443xxxx major when the READING or SOLVE algorithm changes, even
+// if the rotation is unchanged: a calibration taken by older code maps taps
+// to the wrong place and would otherwise keep loading silently. Last bump:
+// trimmed-mean sampling + two-edge axis detection (wrong-position fix).
 #define TOUCH_NVS_NAMESPACE  "loraterm"
 #define TOUCH_NVS_KEY        "touchcal"
-#define TOUCH_CAL_VERSION    (0x54430200u | (TFT_ROTATION & 0x3))
+#define TOUCH_CAL_VERSION    (0x54430201u | (TFT_ROTATION & 0x3))
 
 // ── Display ─────────────────────────────────────────────────────────────────
 // Portrait, 240x320 (PLAN.md section 2.1). The inbox gets more rows on

@@ -140,13 +140,33 @@ TouchCal Touch::solve(const TouchRaw &tl, const TouchRaw &tr,
     c.version    = TOUCH_CAL_VERSION;
     c.zThreshold = TOUCH_Z_THRESHOLD;
 
-    // Which raw axis tracks the screen's X? Compare how much each raw axis
-    // moved along an edge where only screen X changed (top-left -> top-right).
-    // Whichever moved more is the one carrying X. This is what makes the
-    // routine rotation-agnostic: no assumption about how the glass is mounted.
-    const int32_t dxAlongTop = abs((int32_t)tr.x - (int32_t)tl.x);
-    const int32_t dyAlongTop = abs((int32_t)tr.y - (int32_t)tl.y);
-    c.swapAxes = dyAlongTop > dxAlongTop;
+    // Which raw axis drives screen X? Along the TOP edge (TL -> TR) only
+    // screen X changes, so whichever raw axis moved more along it is the one
+    // carrying screen X. The LEFT edge (TL -> BL) gives an independent
+    // verdict: only screen Y changes there, so the raw axis that moved more
+    // is carrying screen Y - which, phrased as "swapped or not", must agree
+    // with the top edge.
+    //
+    // A resistive sheet read through an ADC is noisy and ONE sloppy tap can
+    // make either edge lie - a wrong verdict here rotates the whole mapping
+    // 90 degrees, which looks like "touch works but at the wrong place". So
+    // when the two edges disagree, trust the edge with the larger movement
+    // contrast (the more confident verdict) rather than guessing.
+    const int32_t dxTop  = abs((int32_t)tr.x - (int32_t)tl.x);
+    const int32_t dyTop  = abs((int32_t)tr.y - (int32_t)tl.y);
+    const int32_t dxLeft = abs((int32_t)bl.x - (int32_t)tl.x);
+    const int32_t dyLeft = abs((int32_t)bl.y - (int32_t)tl.y);
+
+    const bool swapTop  = dyTop > dxTop;    // screen X carried by raw Y
+    const bool swapLeft = dxLeft > dyLeft;  // screen Y carried by raw X
+
+    if (swapTop == swapLeft) {
+        c.swapAxes = swapTop;
+    } else {
+        const int32_t topContrast  = abs(dyTop - dxTop);
+        const int32_t leftContrast = abs(dxLeft - dyLeft);
+        c.swapAxes = (leftContrast > topContrast) ? swapLeft : swapTop;
+    }
 
     // Average the two samples on each edge to halve the effect of a sloppy tap.
     auto axisA = [&](const TouchRaw &r) { return (int32_t)(c.swapAxes ? r.y : r.x); };
