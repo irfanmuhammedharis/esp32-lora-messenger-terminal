@@ -41,6 +41,11 @@ static LoraLink      nrfLink;
 static HealthSensor  health;
 static UI            ui;
 
+// When mesh traffic (an Rx or a Tx confirmation) was last seen. This is the
+// second half of the three-state link model (PLAN.md 4.1a): UART liveness
+// comes from LoraLink (beacons count), traffic presence from here.
+static uint32_t      lastTrafficMs = 0;
+
 // The watchdog exists because this device's whole job is showing an emergency
 // message. A wedged UI that still looks alive is the worst failure available,
 // so a stall past WDT_TIMEOUT_S reboots into a working terminal instead.
@@ -63,6 +68,7 @@ static void onLinkEvent(const LinkEvent &ev, void *) {
             }
 
             store.addReceived(ev.src, ev.seq, ev.rssi, ev.snr, ev.text, now);
+            lastTrafficMs = now;
             Serial.printf("  RX node %u seq %u %ddBm/%ddB \"%s\"\n",
                           ev.src, ev.seq, ev.rssi, ev.snr, ev.text);
 
@@ -76,6 +82,7 @@ static void onLinkEvent(const LinkEvent &ev, void *) {
             // fire-and-forget, so this is shown as "sent", never "delivered".
             // PLAN.md risk R7.
             store.addSent(ev.seq, ev.text, now);
+            lastTrafficMs = now;
             ui.setLastTxSeq(ev.seq);
             Serial.printf("  TX confirmed seq %u \"%s\"\n", ev.seq, ev.text);
             if (ui.current() == Screen::Inbox) {
@@ -190,7 +197,7 @@ void setup() {
 void loop() {
     static uint32_t lastReport = 0;
     static uint32_t lastVitals = 0;
-    static bool     lastLinkUp = false;
+    static LinkState lastLinkState = LinkState::Down;
 
     const uint32_t now = millis();
 
@@ -199,11 +206,25 @@ void loop() {
     nrfLink.poll(now);
     health.poll(now);
 
-    const bool up = nrfLink.linkUp(now);
-    if (up != lastLinkUp) {
-        lastLinkUp = up;
-        ui.setLinkUp(up);
-        Serial.printf("  link %s\n", up ? "UP" : "DOWN - nRF not responding");
+    // Three-state link model (PLAN.md 4.1a): UART liveness is any complete
+    // line within NRF_LINK_TIMEOUT_MS - beacons included, because a beacon
+    // proves the wire. Traffic presence is lastTrafficMs. DOWN is reserved
+    // for a silent UART; SEARCHING means the wire works but no peer has
+    // spoken; UP means mesh traffic flows.
+    const bool uartAlive = nrfLink.linkUp(now);
+    const bool trafficFresh = lastTrafficMs != 0 &&
+                              now - lastTrafficMs < NRF_LINK_TIMEOUT_MS;
+    const LinkState st =
+        !uartAlive    ? LinkState::Down
+        : trafficFresh ? LinkState::Up
+                       : LinkState::Searching;
+    if (st != lastLinkState) {
+        lastLinkState = st;
+        ui.setLinkState(st);
+        Serial.printf("  link %s\n",
+                      st == LinkState::Up        ? "UP"
+                      : st == LinkState::Searching ? "SEARCHING FOR NETWORK"
+                                                       : "DOWN - UART silent");
     }
 
     ui.setQueue(nrfLink.queueDepth(), nrfLink.queueCapacity());
@@ -229,7 +250,9 @@ void loop() {
     if (now - lastReport >= 30000) {
         lastReport = now;
         Serial.printf("  t=%lus link %s msgs %u/%u queue %u/%u heap %lu B\n",
-                      (unsigned long)(now / 1000), up ? "UP" : "DOWN",
+                      (unsigned long)(now / 1000),
+                      st == LinkState::Up ? "UP"
+                      : st == LinkState::Searching ? "SCAN" : "DOWN",
                       store.unreadCount(), store.count(),
                       nrfLink.queueDepth(), nrfLink.queueCapacity(),
                       (unsigned long)ESP.getFreeHeap());

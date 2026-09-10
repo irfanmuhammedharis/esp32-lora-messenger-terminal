@@ -86,6 +86,36 @@ static void formatAge(char *buf, size_t n, uint32_t rxMillis, uint32_t nowMs) {
     else                 snprintf(buf, n, "%luh", (unsigned long)(sec / 3600));
 }
 
+// Link state wording and colours (PLAN.md 4.1a). The header gets the short
+// form, the Status screen the full sentence. SEARCHING is deliberately amber,
+// never red: it is a deployment condition, not a fault.
+static const char *linkStateShort(LinkState s) {
+    switch (s) {
+        case LinkState::Down:      return "--";
+        case LinkState::Searching: return "SCAN";
+        case LinkState::Up:        return "UP";
+    }
+    return "?";
+}
+
+static const char *linkStateWord(LinkState s) {
+    switch (s) {
+        case LinkState::Down:      return "LINK DOWN";
+        case LinkState::Searching: return "SEARCHING FOR NETWORK";
+        case LinkState::Up:        return "LINK UP";
+    }
+    return "LINK ?";
+}
+
+static uint32_t linkStateColour(LinkState s) {
+    switch (s) {
+        case LinkState::Down:      return 0xfca5a5;
+        case LinkState::Searching: return kTextWarn;
+        case LinkState::Up:        return 0x86efac;
+    }
+    return kTextDim;
+}
+
 // ── Lifecycle ───────────────────────────────────────────────────────────────
 
 void UI::begin(MessageStore &store, SendFn sendFn, void *user) {
@@ -200,9 +230,10 @@ void UI::refreshHeader() {
     char buf[24];
     const uint8_t unread = store_ ? store_->unreadCount() : 0;
     if (unread) {
-        snprintf(buf, sizeof(buf), "%u NEW %s", unread, linkUp_ ? "UP" : "--");
+        snprintf(buf, sizeof(buf), "%u NEW %s", unread,
+                 linkStateShort(linkState_));
     } else {
-        snprintf(buf, sizeof(buf), "LINK %s", linkUp_ ? "UP" : "--");
+        snprintf(buf, sizeof(buf), "LINK %s", linkStateShort(linkState_));
     }
     lv_label_set_text(hdrRight_, buf);
 }
@@ -578,8 +609,8 @@ void UI::buildStatus() {
 
     char buf[64];
 
-    snprintf(buf, sizeof(buf), "link ......... %s", linkUp_ ? "UP" : "DOWN");
-    label(body, buf, &lv_font_montserrat_16, linkUp_ ? 0x86efac : 0xfca5a5);
+    snprintf(buf, sizeof(buf), "link ......... %s", linkStateWord(linkState_));
+    label(body, buf, &lv_font_montserrat_16, linkStateColour(linkState_));
 
     snprintf(buf, sizeof(buf), "messages ..... %u  (%u unread)",
              store_ ? store_->count() : 0, store_ ? store_->unreadCount() : 0);
@@ -779,9 +810,9 @@ void UI::onMessageArrived(const Message &m, uint32_t nowMs) {
     else refreshHeader();
 }
 
-void UI::setLinkUp(bool up) {
-    if (up == linkUp_) return;
-    linkUp_ = up;
+void UI::setLinkState(LinkState s) {
+    if (s == linkState_) return;
+    linkState_ = s;
     refreshHeader();
 }
 

@@ -93,6 +93,8 @@ static StackType_t  s_statusStack[4096];  // 4 KB - printf-heavy report
 // the periodic report. volatile is sufficient on ESP32 for aligned 8/32-bit
 // reads; a momentary skew between fields is acceptable for a status display.
 static volatile bool     s_linkUp    = false;
+static volatile uint8_t  s_linkState = 0;   // 0 down, 1 searching, 2 up
+                                             // (PLAN.md 4.1a)
 static volatile uint8_t  s_qDepth    = 0;
 static volatile uint8_t  s_qCapacity = NRF_TXQ_LEN;
 static volatile uint32_t s_lines     = 0;
@@ -255,7 +257,8 @@ static void applyTx(const LinkEvent &ev, uint32_t now) {
 static void uiTask(void *) {
     esp_task_wdt_add(NULL);   // this task is the one the watchdog watches
 
-    bool lastLinkUp = false;
+    LinkState lastLinkState = LinkState::Down;
+    uint32_t lastTrafficMs = 0;   // mesh traffic witness (PLAN.md 4.1a)
 
     while (true) {
         const uint32_t now = millis();
@@ -266,15 +269,26 @@ static void uiTask(void *) {
         while (xQueueReceive(s_eventQ, &ev, 0) == pdTRUE) {
             if (ev.type == LinkEventType::Rx)         applyRx(ev, now);
             else if (ev.type == LinkEventType::TxConfirm) applyTx(ev, now);
+            lastTrafficMs = now;
         }
 
         // 2. Refresh link + telemetry for the header and Status screen.
-        const bool up = s_linkUp;
-        if (up != lastLinkUp) {
-            lastLinkUp = up;
-            ui.setLinkUp(up);
+        //    Three states (PLAN.md 4.1a): UART liveness from the radio task
+        //    (beacons count), traffic presence from the queue drain above.
+        const bool trafficFresh = lastTrafficMs != 0 &&
+                                  now - lastTrafficMs < NRF_LINK_TIMEOUT_MS;
+        const LinkState st =
+            !s_linkUp   ? LinkState::Down
+            : trafficFresh ? LinkState::Up
+                           : LinkState::Searching;
+        s_linkState = (uint8_t)st;
+        if (st != lastLinkState) {
+            lastLinkState = st;
+            ui.setLinkState(st);
             Serial.printf("  link %s\n",
-                          up ? "UP" : "DOWN - nRF not responding");
+                          st == LinkState::Up ? "UP"
+                          : st == LinkState::Searching ? "SEARCHING FOR NETWORK"
+                                                           : "DOWN - UART silent");
         }
         ui.setQueue(s_qDepth, s_qCapacity);
         ui.setParserStats(s_lines, s_events, s_overruns);
@@ -299,9 +313,10 @@ static void uiTask(void *) {
 static void statusTask(void *) {
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(30000));
+        const char *st = s_linkState == 2 ? "UP"
+                       : s_linkState == 1 ? "SCAN" : "DOWN";
         Serial.printf("  t=%lus link %s msgs %u/%u queue %u/%u heap %lu B\n",
-                      (unsigned long)(millis() / 1000),
-                      s_linkUp ? "UP" : "DOWN",
+                      (unsigned long)(millis() / 1000), st,
                       s_msgUnread, s_msgCount,
                       s_qDepth, s_qCapacity,
                       (unsigned long)ESP.getFreeHeap());

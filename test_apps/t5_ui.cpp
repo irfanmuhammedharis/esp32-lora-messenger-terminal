@@ -76,6 +76,10 @@ static void mockGenerator(uint32_t nowMs) {
 
     const Message *m = store.at(0);
     if (m) ui.onMessageArrived(*m, nowMs);
+
+    // The first fake message is the mesh-traffic witness: it raises the link
+    // from SEARCHING to UP, exercising the three-state path (PLAN.md 4.1a).
+    if (n == 1) ui.setLinkState(LinkState::Up);
 }
 
 // Synthetic vitals, ~1 Hz: a generated 60 bpm PPG wave with plausible
@@ -137,7 +141,9 @@ void setup() {
     }
 
     ui.begin(store, mockSend, nullptr);
-    ui.setLinkUp(true);
+    // Start in SEARCHING: the fake UART is alive but no fake peer has spoken
+    // yet; the first mock message raises it to UP (PLAN.md 4.1a).
+    ui.setLinkState(LinkState::Searching);
     ui.noteActivity(millis());
 
     Serial.println("-----------------------------------------------------");

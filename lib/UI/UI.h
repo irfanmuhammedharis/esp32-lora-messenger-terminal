@@ -43,6 +43,15 @@ enum class Screen : uint8_t {
     Sos,         // full-screen takeover on an incoming SOS
 };
 
+// The radio link's three states (PLAN.md 4.1a). DOWN is reserved for a
+// genuinely silent UART; SEARCHING means the wire is alive (beacons arrive)
+// but no mesh traffic has been seen; UP means traffic flows.
+enum class LinkState : uint8_t {
+    Down = 0,
+    Searching,
+    Up,
+};
+
 class UI {
 public:
     // Returns false if the send could not be queued, which the UI reports
@@ -64,8 +73,10 @@ public:
     // an SOS, takes the screen over.
     void onMessageArrived(const Message &m, uint32_t nowMs);
 
-    // Link telemetry for the header indicator and the Status screen.
-    void setLinkUp(bool up);
+    // Link telemetry for the header indicator and the Status screen. The
+    // caller decides the state from the pair (UART alive, mesh traffic seen)
+    // described in PLAN.md 4.1a; the UI only renders it.
+    void setLinkState(LinkState s);
     void setQueue(uint8_t depth, uint8_t capacity);
     void setParserStats(uint32_t lines, uint32_t events, uint32_t overruns);
     void setLastTxSeq(uint16_t seq) { lastTxSeq_ = seq; hasTx_ = true; }
@@ -139,7 +150,7 @@ private:
     lv_obj_t *composeCnt_ = nullptr;
 
     uint8_t  detailIdx_ = 0;      // which message the Detail screen shows
-    bool     linkUp_    = false;
+    LinkState linkState_ = LinkState::Down;
     uint8_t  qDepth_    = 0;
     uint8_t  qCap_      = NRF_TXQ_LEN;
     uint32_t pLines_ = 0, pEvents_ = 0, pOverruns_ = 0;
