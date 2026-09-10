@@ -401,19 +401,45 @@ panel          (0,0)-(239,319)     OK - complete display used
 
 `lvglPortGetCoverage()` accumulates the union of every area handed to the
 flush callback, so the second check is measured at the hardware boundary
-rather than inferred from the widget tree., which also carries a compact live vitals strip — `♥ 72 · SpO₂ 98% · 36.6°C` — so the operator sees them without leaving the screen. |
-| **Detail** | `lv_label` | One message full-screen + metadata, with quick-reply actions. |
-| **Presets** | scrolling `lv_list` | Canned messages — the primary path, two taps from the inbox. A list, not an `lv_buttonmatrix`: eight presets sharing a 240 px body would give 30 px rows, under the touch floor, and a matrix cannot scroll to buy room. |
-| **Compose** | `lv_textarea` + `lv_keyboard` | Free text, hard 32-char limit with live counter. |
-| **Vitals** | `lv_chart`, `lv_label`, `lv_bar` | Heart rate, SpO2 and temperature as large numbers, plus a scrolling PPG waveform and a signal-quality bar. Read-only: there is nothing to input
+rather than inferred from the widget tree.
+
 | Screen | LVGL widgets | Purpose |
 |---|---|---|
-| **Inbox** (home) | `lv_list` | Received messages, newest first: sender node, text, age, RSSI. Unread count in the header. |
+| **Inbox** (home) | `lv_list` | Received messages, newest first: sender node, text, age, RSSI. Unread count in the header, which also carries a compact live vitals strip — `♥ 72 · SpO₂ 98% · 36.6°C` — so the operator sees them without leaving the screen. |
 | **Detail** | `lv_label` | One message full-screen + metadata, with quick-reply actions. |
 | **Presets** | scrolling `lv_list` | Canned messages — the primary path, two taps from the inbox. A list, not an `lv_buttonmatrix`: eight presets sharing a 240 px body would give 30 px rows, under the touch floor, and a matrix cannot scroll to buy room. |
 | **Compose** | `lv_textarea` + `lv_keyboard` | Free text, hard 32-char limit with live counter. |
-| **Status** | `lv_label`, `lv_bar` | Link health, last TX/RX, seq numbers, RSSI/SNR, TX queue depth. |
+| **Vitals** | `lv_chart`, `lv_label`, `lv_bar` | Heart rate, SpO2 and temperature as large numbers, plus a scrolling PPG waveform and a signal-quality bar. Read-only: there is nothing to input. |
+| **Status** | `lv_label`, `lv_bar` | Link state (three states, §4.1a), last TX/RX, seq numbers, RSSI/SNR, TX queue depth. |
 | **SOS alert** | `lv_msgbox` | Full-screen takeover on an incoming SOS; must be acknowledged. |
+
+### 4.1a Link state: three states, not two
+
+The header indicator and the Status screen present the radio link in three
+states, because "no messages yet" and "no radio at all" are different
+conditions and must look different:
+
+| State | Meaning | Evidence |
+|---|---|---|
+| **LINK UP** | UART healthy *and* mesh traffic observed | a `+RX`/`+TX` (or parsed log line) within the last `NRF_LINK_TIMEOUT_MS` |
+| **SEARCHING FOR NETWORK** | UART healthy, no mesh traffic yet | lines (the nRF's beacons) arrive within the timeout, but no events — beacons only |
+| **LINK DOWN** | the UART itself is silent | no complete line for `NRF_LINK_TIMEOUT_MS` |
+
+The nRF beacons `hello <n>` every 10 s (`reference/nrf.cpp:314`), which makes
+the middle state *decidable rather than a guess*: a beacon proves the wire,
+and the absence of anything except beacons proves there is no peer to talk to.
+
+**LINK DOWN is reserved for a fault the operator can act on** — wiring, power,
+or the console still on USB CDC (PLAN.md §3.3). **SEARCHING FOR NETWORK is a
+deployment condition, not a fault**, and must not be styled or worded like
+one: no red, no "not responding". A device left alone with no peer in range
+will sit in SEARCHING indefinitely, and that is correct operation.
+
+Implementation note: `LoraLink::linkUp()` already measures exactly the UART
+liveness half (any complete line refreshes `lastLine_`, including beacons).
+What the UI needs on top is one flag, *mesh traffic seen*, set by any Rx or
+TxConfirm event — never by a beacon — and reset on the same timeout as the
+UART. The state is then the pair (uart alive, traffic seen).
 
 Vitals update on two clocks that must not meet. The sensor FIFO is drained at
 100 Hz into a ring buffer by the port layer, while the screen redraws its
@@ -484,14 +510,14 @@ the bug has nowhere to hide.
 | **1c** | **LVGL port bring-up** | `pio run -e t1c_lvgl -t upload` | ✅ **done** — 30–31 refresh/s, pool flat at 26%, heap flat at 280 KB, no leak |
 | **2** | **Touch + calibration** | `pio run -e t2_touch -t upload` | ⏳ idle `z=0` confirmed (no false presses); awaiting the interactive calibration tap sequence |
 | 3 | Touch as an LVGL input | `pio run -e t3_touchui -t upload` | Touch registered as `LV_INDEV_TYPE_POINTER`; every target ≥ 40 px is hit first time across the whole panel; scroll and tap are distinguishable (no accidental scroll swallowing a tap); an uncalibrated panel routes into calibration instead of an unreachable UI |
-| 4 | UART link to nRF | `pio run -e t4_uart -t upload` | **TX** ESP32→nRF: typed line goes on air at the far node, 32-char boundary intact, `+TX` confirms send. **RX** nRF→ESP32: `+RX`/log lines parse into inbox entries with correct sender/seq/RSSI. **Round-trip**: 100 numbered pings answered in order, zero loss. **Soak**: 10 min continuous traffic at 115200, zero framing errors, zero partial lines — counters displayed throughout |
+| 4 | UART link to nRF | `pio run -e t4_uart -t upload` | **TX** ESP32→nRF: typed line goes on air at the far node, 32-char boundary intact, `+TX` confirms send. **RX** nRF→ESP32: `+RX`/log lines parse into inbox entries with correct sender/seq/RSSI. **Round-trip**: 100 numbered pings answered in order, zero loss. **Soak**: 10 min continuous traffic at 115200, zero framing errors, zero partial lines — counters displayed throughout. **States**: a beacon-only link shows SEARCHING FOR NETWORK, never LINK UP; silence shows LINK DOWN |
 | 4x | UART link diagnostic | `pio run -e t4x_linkdiag -t upload` | Self-scoring battery over the live link: loopback, round-trip ping with sequence numbers, framing-error and dropped-line counters, 32-char boundary cases. A 5/5 verdict is the sign-off; rerun whenever the link misbehaves |
 | 4a | Health bring-up: MAX30102 + MAX30205 | `pio run -e t4a_health -t upload` | I2C scan at 100/400 kHz finds 0x57 and 0x48; MAX30102 `REV_ID` = 0x15; FIFO streams red+IR at 100 Hz with no corruption; MAX30205 reads 35–42 °C, stable within ±0.1 °C over a minute |
 | 4b | HR/SpO2 algorithm + native tests | `pio test -e native` | Peak-detected HR within ±3 bpm of truth on captured waveforms (clean and noisy fixtures); SpO2 ratio-of-ratios computed; finger-off waveforms classify as no-valid-signal |
 | 4c | Vitals UI on mock data | `pio run -e t5_ui -t upload` | Vitals screen + inbox header strip render from the fake generator; chart scrolls; `FINGER OFF` state shows correctly |
 | 5 | LVGL UI (mock data) | `pio run -e t5_ui -t upload` | All **7** screens navigable by touch alone, SOS reachable in one tap from every screen, driven by a fake message generator and fake vitals — **no radio involved** |
 | 6 | Protocol layer + native tests | `pio test -e native` | Parser handles both Path A and Path B, plus truncation, garbage, partial lines, buffer overrun |
-| 7 | Integration | `pio run -e app -t upload` | End-to-end: two nodes, message sent from one appears on the other's inbox; live vitals update in the header and Vitals screen from the real sensors |
+| 7 | Integration | `pio run -e app -t upload` | End-to-end: two nodes, message sent from one appears on the other's inbox; live vitals update in the header and Vitals screen from the real sensors; link states correct — DOWN only when the UART is silent, SEARCHING on beacon-only traffic, UP once mesh traffic flows |
 | 8 | Hardening | — | Watchdog, TX queue backpressure, UART-silence detection ("nRF not responding"), brownout check with backlight at full, I2C timeout + recovery, finger-off/poor-signal gating, LED current capped under the regulator budget |
 
 **Proving the link, not just trying it.** Stage 4's exit criteria are
