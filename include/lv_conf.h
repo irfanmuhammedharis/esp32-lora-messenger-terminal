@@ -73,7 +73,9 @@
 // keeps the build small and, more usefully, keeps the API surface small
 // enough to reason about. Re-enable individually if a screen needs one.
 #define LV_USE_CANVAS           0
-#define LV_USE_CHART            0
+// The Vitals screen's PPG sparkline (PLAN.md 4.1) is an lv_chart, so this is
+// the one widget beyond the default set this UI keeps enabled.
+#define LV_USE_CHART            1
 #define LV_USE_ANIMIMG          0
 #define LV_USE_CALENDAR         0
 #define LV_USE_TABVIEW          0

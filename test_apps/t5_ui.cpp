@@ -8,8 +8,9 @@
 // replacing the generator.
 //
 // Exit criteria (PLAN.md stage 5):
-//   - all 6 screens navigable by button AND by touch
+//   - all 7 screens navigable by button AND by touch
 //   - driven by a fake message generator, no radio involved
+//   - the Vitals screen and inbox strip render from fake vitals (stage 4c)
 //
 // Sending is mocked: trySend() reports success and the message lands in the
 // store as an outgoing entry, exactly as a +TX confirmation would.
@@ -18,6 +19,7 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 #include <lvgl.h>
+#include <math.h>
 
 #include "MessageStore.h"
 #include "Touch.h"
@@ -76,6 +78,26 @@ static void mockGenerator(uint32_t nowMs) {
     if (m) ui.onMessageArrived(*m, nowMs);
 }
 
+// Synthetic vitals, ~1 Hz: a generated 60 bpm PPG wave with plausible
+// values. Generated, not recorded - the same deal as the messages, so no
+// sensor hardware is involved in this stage (PLAN.md stage 4c).
+static void mockVitals(uint32_t nowMs) {
+    static uint32_t next = 1500;
+    if (nowMs < next) return;
+    next = nowMs + 1000;
+
+    static uint32_t phase = 0;
+    int32_t wave[200];
+    for (uint32_t i = 0; i < 200; i++) {
+        // One Gaussian systolic bump every 100 samples = 60 bpm at 100 Hz.
+        const double d = (double)((phase + i) % 100) - 50.0;
+        wave[i] = 60000 + (int32_t)(4000.0 * exp(-(d * d) / (2.0 * 8.0 * 8.0)));
+    }
+    phase = (phase + 100) % 100;   // advance exactly one second of samples
+
+    ui.setVitals(72, 98, 36600, true, true, true, wave, 200);
+}
+
 void setup() {
     Serial.begin(115200);
     delay(400);
@@ -122,6 +144,7 @@ void setup() {
     Serial.println("  Touch only. SOS is bottom-left on every screen, one tap.");
     Serial.println("  BACK is bottom-right everywhere except the inbox.");
     Serial.println("  A fake message arrives every 7 s; one of them is an SOS.");
+    Serial.println("  VITALS row + inbox strip run on fake vitals (72 bpm).");
     Serial.println("-----------------------------------------------------");
 }
 
@@ -130,6 +153,7 @@ void loop() {
     const uint32_t now = millis();
 
     mockGenerator(now);
+    mockVitals(now);
     ui.tick(now);
     lvglPortTask();
 

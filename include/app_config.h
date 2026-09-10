@@ -40,6 +40,31 @@
 // ── Message store ───────────────────────────────────────────────────────────
 #define MSG_HISTORY_LEN     32      // ring buffer; oldest is overwritten
 
+// ── Health (MAX30102 + MAX30205) ────────────────────────────────────────────
+// PPG sample rate. 100 Hz is the sweet spot the datasheet's own SpO2 mode
+// defaults to: fine enough to time a pulse peak to 10 ms, coarse enough that
+// a 32-deep FIFO drains cheaply.
+#define HEALTH_SAMPLE_HZ       100
+
+// FIFO drain cadence. At 100 Hz a new sample lands every 10 ms; draining
+// every 50 ms pulls 5 at a time, which keeps the FIFO far from its 32-deep
+// full point while staying inside the per-frame slot between LVGL draws.
+#define HEALTH_FIFO_DRAIN_MS   50
+
+// How often the MAX30205 is read. The part converts in ~50 ms and the value
+// cannot change fast, so once a second is generous.
+#define HEALTH_TEMP_INTERVAL_MS 1000
+
+// PPG LED current, in tenths of a milliamp. 64 = 6.4 mA, the Stage 4a start
+// point (PLAN.md section 2.3): enough red+IR return for a fingertip, low
+// enough not to stress the DevKit's regulator until Stage 8 proves it (R6).
+#define HEALTH_LED_CURRENT_TENTH_MA 64
+
+// A vitals value is dropped from the display after this long without a fresh
+// sensor result - a number this device shows while its sensor is dead would
+// be a lie (PLAN.md risk R10).
+#define HEALTH_STALE_MS        3000
+
 // ── Touch (4-wire resistive, no controller, shares the LCD bus) ─────────────
 // The panel is a bare resistive sheet: reading it means driving two of the
 // four corners and measuring the voltage the divider produces at a third.

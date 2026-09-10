@@ -38,6 +38,7 @@ enum class Screen : uint8_t {
     Detail,      // one message full-screen + metadata
     Presets,     // canned messages - the primary send path
     Compose,     // free text, hard 32-char limit
+    Vitals,      // HR / SpO2 / temperature + PPG sparkline (read-only)
     Status,      // link health, counters, queue depth
     Sos,         // full-screen takeover on an incoming SOS
 };
@@ -69,6 +70,15 @@ public:
     void setParserStats(uint32_t lines, uint32_t events, uint32_t overruns);
     void setLastTxSeq(uint16_t seq) { lastTxSeq_ = seq; hasTx_ = true; }
 
+    // Vitals from the health side, ~1 Hz. Invalid flags carry the decision
+    // made by HealthCore's gates - the UI never invents a number, it renders
+    // a dash and the FINGER OFF / sensor-missing state instead (risk R9).
+    // `wave` is the IR waveform, oldest first; the UI downsamples it into a
+    // fixed sparkline buffer, so any length is accepted.
+    void setVitals(int16_t hr, int16_t spo2, int16_t tempMilliC,
+                   bool hrValid, bool spo2Valid, bool tempValid,
+                   const int32_t *wave, uint16_t waveLen);
+
     // Send the panic preset immediately. Bound to the persistent SOS control
     // in the footer, which is on every screen.
     void sendPanicSos(uint32_t nowMs);
@@ -83,6 +93,7 @@ private:
     void buildDetail();
     void buildPresets();
     void buildCompose();
+    void buildVitals();
     void buildStatus();
     void buildSos();
 
@@ -98,6 +109,8 @@ private:
 
     void trySend(const char *text, uint32_t nowMs);
     void toast(const char *msg, uint32_t nowMs);
+    void refreshVitalsStrip();
+    void refreshVitalsScreen();
     void refreshHeader();
     void applyBlank(bool on);
 
@@ -132,6 +145,24 @@ private:
     uint32_t pLines_ = 0, pEvents_ = 0, pOverruns_ = 0;
     uint16_t lastTxSeq_ = 0;
     bool     hasTx_     = false;
+
+    // Vitals, as delivered by the health side. Values are only meaningful
+    // when their valid flag is set.
+    static constexpr uint16_t kVitalsWaveMax = 120;
+    int16_t vHr_ = -1, vSpo2_ = -1, vTempMilliC_ = 0;
+    bool    vHrOk_ = false, vSpo2Ok_ = false, vTempOk_ = false;
+    bool    vitalsEver_ = false;
+    int8_t  vWave_[kVitalsWaveMax] = {0};
+    uint16_t vWaveLen_ = 0;
+
+    // Vitals widgets, rebuilt with their screen.
+    lv_obj_t          *hdrVitals_  = nullptr;   // inbox strip label
+    lv_obj_t          *vitalsHrL_  = nullptr;
+    lv_obj_t          *vitalsSpo2L_ = nullptr;
+    lv_obj_t          *vitalsTempL_ = nullptr;
+    lv_obj_t          *vitalsStateL_ = nullptr;
+    lv_obj_t          *vitalsChart_ = nullptr;
+    lv_chart_series_t *vitalsSer_  = nullptr;
 
     char     toastMsg_[32] = {0};
     uint32_t toastUntil_   = 0;

@@ -22,7 +22,9 @@
 #include <esp_system.h>
 #include <esp_task_wdt.h>
 #include <lvgl.h>
+#include <Wire.h>
 
+#include "Health.h"
 #include "LoraLink.h"
 #include "MessageStore.h"
 #include "Touch.h"
@@ -36,6 +38,7 @@ static TFT_eSPI      tft;
 static Touch         touch;
 static MessageStore  store;
 static LoraLink      nrfLink;
+static HealthSensor  health;
 static UI            ui;
 
 // The watchdog exists because this device's whole job is showing an emergency
@@ -160,6 +163,18 @@ void setup() {
     nrfLink.begin();
     nrfLink.setEventHandler(onLinkEvent, nullptr);
 
+    // Health is optional by design: the radio is the core function, and a
+    // missing or broken sensor must not brick the terminal (PLAN.md 2.3).
+    // The UI simply never shows vitals it has not been given - the Vitals
+    // screen says "sensor not connected".
+    if (health.begin(Wire, PIN_I2C_SDA, PIN_I2C_SCL)) {
+        Serial.printf("  health ............. MAX30102 %s, MAX30205 %s\n",
+                      health.max30102Present() ? "present" : "absent",
+                      health.max30205Present() ? "present" : "absent");
+    } else {
+        Serial.println("  health ............. no sensor found - vitals disabled");
+    }
+
     ui.begin(store, realSend, nullptr);
     ui.noteActivity(millis());
 
@@ -174,6 +189,7 @@ void setup() {
 
 void loop() {
     static uint32_t lastReport = 0;
+    static uint32_t lastVitals = 0;
     static bool     lastLinkUp = false;
 
     const uint32_t now = millis();
@@ -181,6 +197,7 @@ void loop() {
     esp_task_wdt_reset();
 
     nrfLink.poll(now);
+    health.poll(now);
 
     const bool up = nrfLink.linkUp(now);
     if (up != lastLinkUp) {
@@ -192,6 +209,19 @@ void loop() {
     ui.setQueue(nrfLink.queueDepth(), nrfLink.queueCapacity());
     const LoraLinkParser &p = nrfLink.parser();
     ui.setParserStats(p.linesSeen(), p.eventsParsed(), p.overruns());
+
+    // Vitals at ~1 Hz: the HealthCore window is analysed on this cadence and
+    // the UI renders from the cached result - the FIFO drain inside poll()
+    // already ran at 100 Hz between draws, same as touch (PLAN.md 4.1).
+    if (health.max30102Present() && now - lastVitals >= 1000) {
+        lastVitals = now;
+        HealthReading r = health.latest(now);
+
+        int32_t wave[HealthCore::kWindow];
+        const uint16_t n = health.core().copyIrWave(wave, HealthCore::kWindow);
+        ui.setVitals(r.hr, r.spo2, r.tempMilliC, r.hrValid, r.spo2Valid,
+                     r.tempValid, wave, n);
+    }
 
     ui.tick(now);
     lvglPortTask();

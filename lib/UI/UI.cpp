@@ -1,5 +1,6 @@
 #include "UI.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -47,7 +48,9 @@ static constexpr uint8_t kInboxMaxRows = 16;
 
 // Rows pinned above the messages, so the send path is reachable from the home
 // screen without any navigation: one tap opens presets, a second sends.
-enum ActionId : uint32_t { kActSend = 1, kActCompose = 2, kActStatus = 3 };
+enum ActionId : uint32_t {
+    kActSend = 1, kActCompose = 2, kActStatus = 3, kActVitals = 4
+};
 
 // ── Small helpers ───────────────────────────────────────────────────────────
 
@@ -209,12 +212,16 @@ void UI::show(Screen s) {
 
     cur_ = s;
     hdrRight_ = footHint_ = composeTa_ = composeCnt_ = nullptr;
+    hdrVitals_ = vitalsHrL_ = vitalsSpo2L_ = vitalsTempL_ = nullptr;
+    vitalsStateL_ = vitalsChart_ = nullptr;
+    vitalsSer_ = nullptr;
 
     switch (s) {
         case Screen::Inbox:   buildInbox();   break;
         case Screen::Detail:  buildDetail();  break;
         case Screen::Presets: buildPresets(); break;
         case Screen::Compose: buildCompose(); break;
+        case Screen::Vitals:  buildVitals();  break;
         case Screen::Status:  buildStatus();  break;
         case Screen::Sos:     buildSos();     break;
     }
@@ -239,6 +246,19 @@ void UI::buildInbox() {
     scr_ = makeScreen();
     makeHeader(scr_, "INBOX");
 
+    // Vitals strip, pinned directly under the header title: compact live
+    // HR / SpO2 / temperature, always visible on the home screen without a
+    // navigation step (PLAN.md 4.1). Informational only - no touch target,
+    // and it scrolls with nothing, by design.
+    lv_obj_t *strip = lv_obj_create(scr_);
+    lv_obj_set_size(strip, LV_PCT(100), 18);
+    lv_obj_set_style_bg_color(strip, lv_color_hex(kFooterBg), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(strip, LV_OPA_COVER, LV_PART_MAIN);
+    stripStyle(strip);
+    hdrVitals_ = label(strip, "", &lv_font_montserrat_14, kTextDim);
+    lv_obj_center(hdrVitals_);
+    refreshVitalsStrip();
+
     lv_obj_t *list = lv_list_create(scr_);
     lv_obj_set_width(list, LV_PCT(100));
     lv_obj_set_flex_grow(list, 1);
@@ -254,6 +274,7 @@ void UI::buildInbox() {
     static const Action actions[] = {
         {"SEND PRESET",  kActSend},
         {"COMPOSE TEXT", kActCompose},
+        {"VITALS",       kActVitals},
         {"LINK STATUS",  kActStatus},
     };
 
@@ -483,6 +504,68 @@ void UI::buildCompose() {
     makeFooter(scr_);
 }
 
+// ── Vitals ──────────────────────────────────────────────────────────────────
+
+// One value tile: a big number the refresh loop rewrites, a unit caption.
+static lv_obj_t *vitalTile(lv_obj_t *parent, const char *unit) {
+    lv_obj_t *t = lv_obj_create(parent);
+    lv_obj_set_size(t, LV_PCT(33), LV_PCT(100));
+    lv_obj_set_flex_grow(t, 1);
+    lv_obj_set_style_bg_color(t, lv_color_hex(kRowBg), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(t, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(t, 6, LV_PART_MAIN);
+    lv_obj_set_flex_flow(t, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(t, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *big = label(t, "--", &lv_font_montserrat_28, 0xffffff);
+    label(t, unit, &lv_font_montserrat_14, kTextDim);
+    return big;
+}
+
+void UI::buildVitals() {
+    scr_ = makeScreen();
+    makeHeader(scr_, "VITALS");
+    lv_obj_t *body = makeBody(scr_);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(body, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(body, 6, LV_PART_MAIN);
+
+    // Three equal value tiles: HR, SpO2, temperature.
+    lv_obj_t *row = lv_obj_create(body);
+    lv_obj_set_size(row, LV_PCT(100), 68);
+    stripStyle(row);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, 6, LV_PART_MAIN);
+
+    vitalsHrL_   = vitalTile(row, "bpm");
+    vitalsSpo2L_ = vitalTile(row, "% SpO2");
+    vitalsTempL_ = vitalTile(row, "deg C");
+
+    // Signal state. This is where the quality gate speaks: a value is shown
+    // only when HealthCore's gate passed, and this line says why otherwise.
+    vitalsStateL_ = label(body, "", &lv_font_montserrat_14, kTextWarn);
+    lv_obj_set_width(vitalsStateL_, LV_PCT(100));
+    lv_label_set_long_mode(vitalsStateL_, LV_LABEL_LONG_MODE_WRAP);
+
+    // PPG sparkline: the most recent IR waveform, 0..100 normalised.
+    vitalsChart_ = lv_chart_create(body);
+    lv_obj_set_size(vitalsChart_, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(vitalsChart_, 1);
+    lv_obj_set_style_bg_color(vitalsChart_, lv_color_hex(kRowBg), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(vitalsChart_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(vitalsChart_, 6, LV_PART_MAIN);
+    lv_chart_set_type(vitalsChart_, LV_CHART_TYPE_LINE);
+    lv_chart_set_point_count(vitalsChart_, kVitalsWaveMax);
+    lv_chart_set_range(vitalsChart_, LV_CHART_AXIS_PRIMARY_Y, 0, 100);
+    lv_chart_set_div_line_count(vitalsChart_, 0, 2);
+    vitalsSer_ = lv_chart_add_series(vitalsChart_, lv_color_hex(0x22d3ee),
+                                     LV_CHART_AXIS_PRIMARY_Y);
+
+    refreshVitalsScreen();
+    makeFooter(scr_);
+}
+
 // ── Status ──────────────────────────────────────────────────────────────────
 
 void UI::buildStatus() {
@@ -602,6 +685,7 @@ void UI::onActionClicked(lv_event_t *e) {
         case kActSend:    ui->show(Screen::Presets); break;
         case kActCompose: ui->show(Screen::Compose); break;
         case kActStatus:  ui->show(Screen::Status);  break;
+        case kActVitals:  ui->show(Screen::Vitals);  break;
         default: break;
     }
 }
@@ -710,6 +794,114 @@ void UI::setParserStats(uint32_t lines, uint32_t events, uint32_t overruns) {
     pLines_    = lines;
     pEvents_   = events;
     pOverruns_ = overruns;
+}
+
+void UI::setVitals(int16_t hr, int16_t spo2, int16_t tempMilliC,
+                   bool hrValid, bool spo2Valid, bool tempValid,
+                   const int32_t *wave, uint16_t waveLen) {
+    vHr_ = hr;
+    vSpo2_ = spo2;
+    vTempMilliC_ = tempMilliC;
+    vHrOk_ = hrValid;
+    vSpo2Ok_ = spo2Valid;
+    vTempOk_ = tempValid;
+    vitalsEver_ = true;
+
+    // Downsample the IR wave into the fixed sparkline buffer, keeping the
+    // most recent portion, then normalise to 0..100 for the chart.
+    if (wave && waveLen) {
+        const uint16_t stride =
+            (waveLen + kVitalsWaveMax - 1) / kVitalsWaveMax;
+        int32_t tmp[kVitalsWaveMax];
+        uint16_t n = 0;
+        int32_t lo = INT32_MAX, hi = INT32_MIN;
+        for (uint16_t i = 0; i < waveLen && n < kVitalsWaveMax; i += stride) {
+            const int32_t v = wave[i];
+            tmp[n++] = v;
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+        const int32_t span = hi - lo;
+        for (uint16_t i = 0; i < n; i++) {
+            int32_t v = span > 0 ? (tmp[i] - lo) * 100 / span : 50;
+            if (v < 0) v = 0;
+            if (v > 100) v = 100;
+            vWave_[i] = (int8_t)v;
+        }
+        vWaveLen_ = n;
+    }
+
+    refreshVitalsStrip();
+    if (cur_ == Screen::Vitals) refreshVitalsScreen();
+}
+
+// The compact strip under the inbox header. Dash-heavy by design: a dash is
+// the truth "unknown", where a plausible number would be a lie (risk R9).
+void UI::refreshVitalsStrip() {
+    if (!hdrVitals_) return;
+
+    char hrb[12], spb[12], tb[12];
+    if (vitalsEver_ && vHrOk_)   snprintf(hrb, sizeof(hrb), "%d bpm", vHr_);
+    else                         snprintf(hrb, sizeof(hrb), "-- bpm");
+    if (vitalsEver_ && vSpo2Ok_) snprintf(spb, sizeof(spb), "%d%%", vSpo2_);
+    else                         snprintf(spb, sizeof(spb), "--%%");
+    if (vitalsEver_ && vTempOk_) snprintf(tb, sizeof(tb), "%.1f", vTempMilliC_ / 1000.0);
+    else                         snprintf(tb, sizeof(tb), "--.-");
+
+    char buf[56];
+    snprintf(buf, sizeof(buf), "HR %s   SpO2 %s   %s C", hrb, spb, tb);
+    lv_label_set_text(hdrVitals_, buf);
+    lv_obj_set_style_text_color(hdrVitals_,
+        lv_color_hex(vHrOk_ && vSpo2Ok_ ? 0x86efac : kTextDim), LV_PART_MAIN);
+}
+
+void UI::refreshVitalsScreen() {
+    char b[16];
+
+    if (vitalsHrL_) {
+        if (vitalsEver_ && vHrOk_) snprintf(b, sizeof(b), "%d", vHr_);
+        else                       snprintf(b, sizeof(b), "--");
+        lv_label_set_text(vitalsHrL_, b);
+    }
+    if (vitalsSpo2L_) {
+        if (vitalsEver_ && vSpo2Ok_) snprintf(b, sizeof(b), "%d", vSpo2_);
+        else                         snprintf(b, sizeof(b), "--");
+        lv_label_set_text(vitalsSpo2L_, b);
+    }
+    if (vitalsTempL_) {
+        if (vitalsEver_ && vTempOk_) snprintf(b, sizeof(b), "%.1f", vTempMilliC_ / 1000.0);
+        else                         snprintf(b, sizeof(b), "--.-");
+        lv_label_set_text(vitalsTempL_, b);
+    }
+
+    if (vitalsStateL_) {
+        const char *txt;
+        uint32_t colour;
+        if (!vitalsEver_) {
+            txt = "sensor not connected";
+            colour = kTextDim;
+        } else if (!vHrOk_ && !vSpo2Ok_) {
+            txt = "FINGER OFF - place finger on the sensor";
+            colour = kTextWarn;
+        } else if (vHrOk_ && vSpo2Ok_) {
+            txt = "signal OK";
+            colour = 0x86efac;
+        } else {
+            txt = "measuring...";
+            colour = kTextWarn;
+        }
+        lv_label_set_text(vitalsStateL_, txt);
+        lv_obj_set_style_text_color(vitalsStateL_, lv_color_hex(colour),
+                                    LV_PART_MAIN);
+    }
+
+    if (vitalsChart_ && vitalsSer_) {
+        for (uint16_t i = 0; i < kVitalsWaveMax; i++) {
+            lv_chart_set_value_by_id(vitalsChart_, vitalsSer_, i,
+                                     i < vWaveLen_ ? vWave_[i] : 50);
+        }
+        lv_chart_refresh(vitalsChart_);
+    }
 }
 
 void UI::applyBlank(bool on) {

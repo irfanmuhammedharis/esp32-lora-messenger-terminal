@@ -79,6 +79,16 @@
 #define PIN_NRF_TX     17   // ESP32 TX  ->  nRF RX
 #define PIN_NRF_RX     16   // ESP32 RX  <-  nRF TX
 
+// ── I2C health bus: MAX30102 (HR/SpO2) + MAX30205 (body temp) ──────────────
+// The ESP32's default Wire pins are GPIO21/22, and both are LCD_D2/D3 on this
+// build, so the bus is constructed explicitly with Wire.begin(32, 33) and
+// never with the defaults. GPIO32/33 are the two clean bidirectional pins the
+// button removal freed (PLAN.md section 2.3).
+#define PIN_I2C_SDA      32
+#define PIN_I2C_SCL      33
+#define PIN_MAX30102_INT 35   // optional; input-only pin, needs an external
+                              // pull-up - the first cut polls the FIFO instead
+
 // ── Guard against pins.h and platformio.ini drifting apart ──────────────────
 #ifdef TFT_CS
 static_assert(TFT_CS  == PIN_LCD_CS,  "TFT_CS build flag != PIN_LCD_CS");
