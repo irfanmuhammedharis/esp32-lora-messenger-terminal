@@ -216,6 +216,12 @@ onto a hardware UART.** `uart_dev` is `DT_CHOSEN(zephyr_console)`
 ([reference/nrf.cpp:75](reference/nrf.cpp#L75)) and the ESP32 cannot act as a USB host.
 See [PLAN.md](PLAN.md) §3.3.
 
+**Verify before trusting the link** (Stage 4, PLAN.md §5): a line typed on
+the ESP32 appears on air at the far node (**TX**), the nRF's `+RX` lines land
+in the ESP32 inbox (**RX**), 100 round-trip pings come back in order with
+zero loss, then a 10-minute soak with zero framing errors. The `t4x_linkdiag`
+environment re-runs this battery on demand.
+
 ---
 
 ## 7. Build order

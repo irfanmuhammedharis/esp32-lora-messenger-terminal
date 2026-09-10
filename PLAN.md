@@ -484,7 +484,8 @@ the bug has nowhere to hide.
 | **1c** | **LVGL port bring-up** | `pio run -e t1c_lvgl -t upload` | ✅ **done** — 30–31 refresh/s, pool flat at 26%, heap flat at 280 KB, no leak |
 | **2** | **Touch + calibration** | `pio run -e t2_touch -t upload` | ⏳ idle `z=0` confirmed (no false presses); awaiting the interactive calibration tap sequence |
 | 3 | Touch as an LVGL input | `pio run -e t3_touchui -t upload` | Touch registered as `LV_INDEV_TYPE_POINTER`; every target ≥ 40 px is hit first time across the whole panel; scroll and tap are distinguishable (no accidental scroll swallowing a tap); an uncalibrated panel routes into calibration instead of an unreachable UI |
-| 4 | UART link to nRF | `pio run -e t4_uart -t upload` | Loopback passes; then real nRF: typed line goes on air, `+RX`/log line parses, no framing errors at 115200 over 10 min |
+| 4 | UART link to nRF | `pio run -e t4_uart -t upload` | **TX** ESP32→nRF: typed line goes on air at the far node, 32-char boundary intact, `+TX` confirms send. **RX** nRF→ESP32: `+RX`/log lines parse into inbox entries with correct sender/seq/RSSI. **Round-trip**: 100 numbered pings answered in order, zero loss. **Soak**: 10 min continuous traffic at 115200, zero framing errors, zero partial lines — counters displayed throughout |
+| 4x | UART link diagnostic | `pio run -e t4x_linkdiag -t upload` | Self-scoring battery over the live link: loopback, round-trip ping with sequence numbers, framing-error and dropped-line counters, 32-char boundary cases. A 5/5 verdict is the sign-off; rerun whenever the link misbehaves |
 | 4a | Health bring-up: MAX30102 + MAX30205 | `pio run -e t4a_health -t upload` | I2C scan at 100/400 kHz finds 0x57 and 0x48; MAX30102 `REV_ID` = 0x15; FIFO streams red+IR at 100 Hz with no corruption; MAX30205 reads 35–42 °C, stable within ±0.1 °C over a minute |
 | 4b | HR/SpO2 algorithm + native tests | `pio test -e native` | Peak-detected HR within ±3 bpm of truth on captured waveforms (clean and noisy fixtures); SpO2 ratio-of-ratios computed; finger-off waveforms classify as no-valid-signal |
 | 4c | Vitals UI on mock data | `pio run -e t5_ui -t upload` | Vitals screen + inbox header strip render from the fake generator; chart scrolls; `FINGER OFF` state shows correctly |
@@ -492,6 +493,17 @@ the bug has nowhere to hide.
 | 6 | Protocol layer + native tests | `pio test -e native` | Parser handles both Path A and Path B, plus truncation, garbage, partial lines, buffer overrun |
 | 7 | Integration | `pio run -e app -t upload` | End-to-end: two nodes, message sent from one appears on the other's inbox; live vitals update in the header and Vitals screen from the real sensors |
 | 8 | Hardening | — | Watchdog, TX queue backpressure, UART-silence detection ("nRF not responding"), brownout check with backlight at full, I2C timeout + recovery, finger-off/poor-signal gating, LED current capped under the regulator budget |
+
+**Proving the link, not just trying it.** Stage 4's exit criteria are
+bidirectional and measured, because a UART with no parity and no CRC cannot
+tell you it dropped a byte — only traffic counts can. Every check writes a
+number to the screen: lines sent, `+TX` acks, parsed `+RX` lines, framing
+errors, dropped lines. A link that "looks fine" in a demo but drops one byte
+in a thousand is exactly the failure the soak with counters catches, and a
+silent 32-char truncation at the nRF boundary would show up as a short
+message at the far node. The 4x diagnostic re-runs the same battery on
+demand after any wiring or firmware change, same as the touch diagnostics do
+for the panel.
 
 **Why the buttons went away.** They were in the design to guarantee a second
 way in, and instead they introduced a way for the device to act on its own:
@@ -569,6 +581,7 @@ new thing in the system is one function call replacing the fake generator.
 | **R1** | **nRF console is on USB CDC**, so the ESP32 can never reach it | Zephyr overlay repointing `zephyr,console` to `uart0`. Blocks Stage 4 — resolve early. |
 | **R2** | 32-byte payload cap silently truncates messages | Enforce in the compose UI with a live counter; unit-test the boundary |
 | **R3** | **Unknown LCD controller.** A wrong `*_DRIVER` flag looks exactly like a wiring fault | Stage 1a identifies it empirically before any driver is compiled |
+| **R11** | The UART carries no integrity check — a dropped or corrupted byte silently mangles a message | Line-based framing with on-screen counters; Stage 4's 10 min soak and the 4x diagnostic require zero errors; lines that fail to parse are counted, never shown |
 | **R4** | **Touch shares four LCD lines and has no controller.** Every read reconfigures `CS`/`RS` as analog inputs and hand-drives two data lines, leaving the display bus in the wrong state | Save/restore pin modes around each read; sample only between frames, never mid-draw. Owned by Stage 2 |
 | **R4b** | The shield's 3.3 V regulator is fed from its `5V` pin. Feeding it 3.3 V yields ~2.2 V and the controller never starts — presenting as a dead bus | Feed `5V` from `VIN`. A minority of shields instead have 5 V input dividers needing the opposite fix; Stage 1a's failure text distinguishes the two ([WIRING.md](WIRING.md) §1) |
 | **R4c** | ESP32 ADC2 (used for touch) is unavailable whenever WiFi is active | This device never enables WiFi. Worth a comment at any future point someone reaches for it |
