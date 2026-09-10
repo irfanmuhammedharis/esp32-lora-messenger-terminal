@@ -1,7 +1,9 @@
 # LoRa Messenger Terminal — Build Plan
 
-ESP32 front-end (2.4" ILI9342 resistive touch TFT, touch-only) driving an
-nRF52840 LoRa mesh node over a hardware UART.
+ESP32 front-end (2.4" ILI9342 resistive touch TFT, touch-only input) that
+drives an nRF52840 LoRa mesh node over a hardware UART and monitors the
+operator's vitals locally — heart rate and SpO2 from a MAX30102, body
+temperature from a MAX30205 — on a shared I2C bus.
 
 ---
 
@@ -16,9 +18,13 @@ nRF52840 LoRa mesh node over a hardware UART.
    │  │ 4-wire resistive touch │  │◄────────►│  │ mesh_tx / handle_rx │  │
    │  │ (no controller)        │  │ 115200   │  │ TTL=3, dup-cache    │  │
    │  └────────────────────────┘  │  8N1     │  └──────────┬──────────┘  │
-   │                              │          │             │             │
-   │   touch is the ONLY input    │          │        ((( LoRa )))       │
-   │                              │          │        865.1 MHz SF10     │
+   │  ┌────────────────────────┐  │          │             │             │
+   │  │ MAX30102  HR / SpO2    │  │          │        ((( LoRa )))       │
+   │  │ MAX30205  body temp    │  │          │        865.1 MHz SF10     │
+   │  │ I2C on GPIO32/33       │  │          │                           │
+   │  └────────────────────────┘  │          │                           │
+   │   touch is the only user     │          │                           │
+   │   input; vitals ride I2C     │          │                           │
    └──────────────────────────────┘          └───────────────────────────┘
         UI + message store                        radio + mesh routing
 ```
@@ -28,6 +34,11 @@ framing, TTL, duplicate suppression, listen-before-talk, retries. The ESP32
 owns *nothing* radio-shaped — it is a terminal. It renders received text,
 collects outgoing text, and speaks one line-based protocol over UART. Keeping
 that boundary sharp is what makes the ESP32 side unit-testable on a PC.
+
+Vitals monitoring is the opposite: it is entirely terminal-local. The ESP32
+owns the MAX30102/MAX30205, runs the HR/SpO2 DSP itself and renders the
+results — nothing health-shaped crosses the UART in this revision, so the
+radio protocol stays frozen while the health side is built (Stages 4a–4c).
 
 ---
 
@@ -56,6 +67,9 @@ TFT_eSPI reads its configuration at compile time — `static_assert`s in
 | LCD_RST | 15 | `A4` | |
 | UART2 TX → nRF RX | 17 | — | |
 | UART2 RX ← nRF TX | 16 | — | |
+| I2C SDA → MAX30102 + MAX30205 | 32 | — | health bus — see §2.3 |
+| I2C SCL → MAX30102 + MAX30205 | 33 | — | health bus — see §2.3 |
+| MAX30102 INT | 35 | — | optional, input-only; open-drain → external pull-up |
 
 **The assignment is forced, not chosen.** Three constraints leave almost no
 freedom:
@@ -67,18 +81,22 @@ freedom:
    both are *sampled as analog voltages*. They must land on ADC pins, which
    is why they are GPIO25/26 (ADC2_CH8/CH9) and not anything else. ADC2 is
    unusable while WiFi runs — free here, since this device never enables it.
-3. Nothing else needs a pin. Input is the touch sheet, which is already
-   wired inside the shield onto lines the LCD uses, so the whole user
-   interface costs **zero** additional GPIO.
+3. The health sensors need I2C: two bidirectional pins. The ESP32's default
+   `Wire` pins are GPIO21/22, and both are `LCD_D2`/`LCD_D3` here — so the
+   bus is constructed explicitly on GPIO32/33, the two clean pins the button
+   removal freed. An optional MAX30102 INT line can take GPIO35.
 
 Deliberately avoided: **GPIO6–11** (SPI flash, absent from this header),
 **GPIO12** (MTDI strapping — high at boot switches the flash regulator to
 1.8 V and the board will not start), **GPIO2** (its onboard LED fights an
 input pull-up).
 
-Free after this build: **GPIO2, 32, 33, 34, 35, 36, 39** — seven pins, of
-which 32/33 are fully bidirectional. Dropping the push buttons in favour of
-touch is what freed 32–35. The shield's SD-card slot (`D10`–`D13`) is left
+Dropping the push buttons in favour of touch is what freed 32–35, and the
+health bus spends the two clean bidirectional pins among them. Free after the
+health build: **GPIO2, 34, 36, 39** — none of them clean (2 carries the
+onboard LED and strapping, 34 has no pull-up, 36/39 are analog-only), so this
+is a one-way door: a future peripheral needing a *reliable* I/O pin will have
+to reclaim something. The shield's SD-card slot (`D10`–`D13`) is left
 unconnected.
 
 **The backlight costs nothing.** It is hardwired to the shield's own 3.3 V
@@ -166,6 +184,37 @@ What it costs, stated plainly because it is now a single point of failure:
 * Resistive touch through an ADC, sharing four lines with the LCD bus, is the
   least reliable subsystem in the build. Stage 2 stops being a bring-up step
   and becomes the thing the product depends on.
+
+### 2.3 Health sensors — MAX30102 + MAX30205
+
+The terminal also measures its operator's vitals, locally:
+
+| Sensor | Measures | I2C addr | ID check |
+|---|---|---|---|
+| MAX30102 | Heart rate + SpO2 (red/IR photoplethysmography) | 0x57 (fixed) | `REV_ID` reg 0xFF reads 0x15 |
+| MAX30205 | Body temperature | 0x48 (A0–A2 low; 0x48–0x4F range) | readback within 35–42 °C |
+
+**The MAX30102 cannot measure temperature.** Its die-temperature register
+(0x1F) exists only to compensate the LED wavelengths internally; it is not a
+body sensor. That is why a MAX30205 sits on the same bus — the two share SDA,
+SCL, power and ground, and cost one extra I2C address.
+
+Why GPIO32/33: the ESP32's default `Wire` pins are GPIO21/22, and both are
+LCD_D2/D3 on this build. `Wire.begin(32, 33)` — the bus is explicit, and
+`pins.h` gains `PIN_I2C_SDA` / `PIN_I2C_SCL` as the single source of truth.
+Pull-ups: the breakouts normally carry the 4.7 kΩ pair; Stage 4a's I2C scan
+proves it either way.
+
+INT: the MAX30102's interrupt is open-drain active-low. The first cut polls
+the FIFO instead — one wire fewer, and LVGL already provides the between-frame
+slot that touch uses. If a later stage wants the interrupt, GPIO35
+(input-only, fine for an input) takes it with an external pull-up, since
+GPIO34/35 have no internal one.
+
+Power comes from the **ESP32's own 3V3 pin, not the shield's regulator** (see
+R4b). LED budget: both PPG LEDs are configurable 0–51 mA in 0.2 mA steps;
+fingertip use starts at 6.4 mA and stays capped low until the DevKit's
+regulator is proven to hold (R6).
 
 ## 3. The ESP32 ↔ nRF52840 link protocol
 
@@ -262,6 +311,7 @@ esp32loralcd/
 │   ├── lvgl_port/          LVGL <-> TFT_eSPI glue: draw buffer, flush, tick
 │   ├── LoraLink/           UART framing + line parser + TX queue
 │   ├── MessageStore/       fixed-capacity ring buffer of received messages
+│   ├── Health/             MAX30102 + MAX30205: register maps, DSP, transport
 │   └── UI/                 LVGL screens built on lvgl_port
 ├── src/main.cpp            Stage 7 integration — wiring only, no logic
 └── test/
@@ -274,6 +324,12 @@ contain **no Arduino calls**. They
 take bytes and a millisecond count as arguments. That way `pio test -e native`
 runs the protocol and UI-state logic on the PC in under a second, and the
 hardware stages only ever have to prove *wiring*, not logic.
+
+`Health` follows the same rule: the register maps, the peak detector and the
+SpO2 ratio math are a pure core that takes sample arrays and returns numbers —
+no I2C, no Arduino — so `pio test -e native` feeds it captured PPG waveforms
+and grades its heart rate against known truth (Stage 4b). Only a thin
+transport layer speaks `Wire`.
 
 ### 4.0 The UI stack: LVGL v9.5
 
@@ -345,10 +401,11 @@ panel          (0,0)-(239,319)     OK - complete display used
 
 `lvglPortGetCoverage()` accumulates the union of every area handed to the
 flush callback, so the second check is measured at the hardware boundary
-rather than inferred from the widget tree.
-
-### 4.1 UI screens and navigation
-
+rather than inferred from the widget tree., which also carries a compact live vitals strip — `♥ 72 · SpO₂ 98% · 36.6°C` — so the operator sees them without leaving the screen. |
+| **Detail** | `lv_label` | One message full-screen + metadata, with quick-reply actions. |
+| **Presets** | scrolling `lv_list` | Canned messages — the primary path, two taps from the inbox. A list, not an `lv_buttonmatrix`: eight presets sharing a 240 px body would give 30 px rows, under the touch floor, and a matrix cannot scroll to buy room. |
+| **Compose** | `lv_textarea` + `lv_keyboard` | Free text, hard 32-char limit with live counter. |
+| **Vitals** | `lv_chart`, `lv_label`, `lv_bar` | Heart rate, SpO2 and temperature as large numbers, plus a scrolling PPG waveform and a signal-quality bar. Read-only: there is nothing to input
 | Screen | LVGL widgets | Purpose |
 |---|---|---|
 | **Inbox** (home) | `lv_list` | Received messages, newest first: sender node, text, age, RSSI. Unread count in the header. |
@@ -357,6 +414,14 @@ rather than inferred from the widget tree.
 | **Compose** | `lv_textarea` + `lv_keyboard` | Free text, hard 32-char limit with live counter. |
 | **Status** | `lv_label`, `lv_bar` | Link health, last TX/RX, seq numbers, RSSI/SNR, TX queue depth. |
 | **SOS alert** | `lv_msgbox` | Full-screen takeover on an incoming SOS; must be acknowledged. |
+
+Vitals update on two clocks that must not meet. The sensor FIFO is drained at
+100 Hz into a ring buffer by the port layer, while the screen redraws its
+numbers at ~1 Hz from cached values — the same "sample between frames, never
+mid-draw" rule touch obeys. Values are only shown when the signal-quality
+gate passes; otherwise the screen shows a `FINGER OFF` state rather than a
+plausible-looking number. The Vitals screen adds nothing to the input rules
+above: it is read-only.
 
 **One input device, one widget tree.** The touch panel registers as a single
 `LV_INDEV_TYPE_POINTER`. There is no keypad and no `lv_group_t`: with nothing
@@ -420,10 +485,13 @@ the bug has nowhere to hide.
 | **2** | **Touch + calibration** | `pio run -e t2_touch -t upload` | ⏳ idle `z=0` confirmed (no false presses); awaiting the interactive calibration tap sequence |
 | 3 | Touch as an LVGL input | `pio run -e t3_touchui -t upload` | Touch registered as `LV_INDEV_TYPE_POINTER`; every target ≥ 40 px is hit first time across the whole panel; scroll and tap are distinguishable (no accidental scroll swallowing a tap); an uncalibrated panel routes into calibration instead of an unreachable UI |
 | 4 | UART link to nRF | `pio run -e t4_uart -t upload` | Loopback passes; then real nRF: typed line goes on air, `+RX`/log line parses, no framing errors at 115200 over 10 min |
-| 5 | LVGL UI (mock data) | `pio run -e t5_ui -t upload` | All 6 screens navigable by touch alone, SOS reachable in one tap from every screen, driven by a fake message generator — **no radio involved** |
+| 4a | Health bring-up: MAX30102 + MAX30205 | `pio run -e t4a_health -t upload` | I2C scan at 100/400 kHz finds 0x57 and 0x48; MAX30102 `REV_ID` = 0x15; FIFO streams red+IR at 100 Hz with no corruption; MAX30205 reads 35–42 °C, stable within ±0.1 °C over a minute |
+| 4b | HR/SpO2 algorithm + native tests | `pio test -e native` | Peak-detected HR within ±3 bpm of truth on captured waveforms (clean and noisy fixtures); SpO2 ratio-of-ratios computed; finger-off waveforms classify as no-valid-signal |
+| 4c | Vitals UI on mock data | `pio run -e t5_ui -t upload` | Vitals screen + inbox header strip render from the fake generator; chart scrolls; `FINGER OFF` state shows correctly |
+| 5 | LVGL UI (mock data) | `pio run -e t5_ui -t upload` | All **7** screens navigable by touch alone, SOS reachable in one tap from every screen, driven by a fake message generator and fake vitals — **no radio involved** |
 | 6 | Protocol layer + native tests | `pio test -e native` | Parser handles both Path A and Path B, plus truncation, garbage, partial lines, buffer overrun |
-| 7 | Integration | `pio run -e app -t upload` | End-to-end: two nodes, message sent from one appears on the other's inbox |
-| 8 | Hardening | — | Watchdog, TX queue backpressure, UART-silence detection ("nRF not responding"), brownout check with backlight at full |
+| 7 | Integration | `pio run -e app -t upload` | End-to-end: two nodes, message sent from one appears on the other's inbox; live vitals update in the header and Vitals screen from the real sensors |
+| 8 | Hardening | — | Watchdog, TX queue backpressure, UART-silence detection ("nRF not responding"), brownout check with backlight at full, I2C timeout + recovery, finger-off/poor-signal gating, LED current capped under the regulator budget |
 
 **Why the buttons went away.** They were in the design to guarantee a second
 way in, and instead they introduced a way for the device to act on its own:
@@ -479,6 +547,15 @@ real ILI9341: **portrait 240×320 is `TFT_ROTATION 1`**, not 0.
 
 **Why this order.** Stages 1–3 prove the three input/output surfaces
 independently, so a display fault can never be mistaken for a touch fault.
+
+**Why 4a/4b/4c exist.** A wrong SpO2 number has three possible authors — bad
+sensor, bad DSP, bad rendering — and the health stages keep them apart
+exactly as Stages 1–5 keep display, touch and UI apart. 4a proves the sensor
+and the bus in raw form (part IDs, FIFO rate, temperature readback); 4b
+proves the algorithm on the PC against known waveforms, where a bug costs a
+second instead of a finger on the glass; 4c proves the screen against fake
+vitals, so at Stage 7 the only new thing is one live data feed — the same
+reasoning that keeps the radio path honest.
 Stage 5 builds the entire UI against *fake* messages, which means the UI is
 finished and debugged before the radio is ever attached — at Stage 7 the only
 new thing in the system is one function call replacing the fake generator.
@@ -498,8 +575,11 @@ new thing in the system is one function call replacing the fake generator.
 | **R4d** | **Touch is now the only input, so it is a single point of failure.** A lost or corrupt calibration leaves a UI nothing can reach | Boot checks `Touch::loadCal()` and routes into the Stage 2 calibration flow on failure. The flow itself must be usable *uncalibrated* — it is, because it works in raw ADC space and asks for taps at known targets rather than reading widgets |
 | **R4e** | Dropping the buttons removes the out-of-band panic path. A long press on OK used to fire an SOS regardless of what held focus | A persistent on-screen SOS control on every screen, sized ≥ 40 px, never more than one tap from anywhere |
 | **R5** | Zephyr log lines could be dropped in deferred mode under load | `CONFIG_LOG_MODE_IMMEDIATE=y`, and prefer Path B |
-| **R6** | 3.3V regulator on a DevKit V1 can sag with the TFT at full brightness | Check `esp_reset_reason()` for brownout during Stage 1; power the TFT from a separate 3.3V rail if needed |
+| **R6** | 3.3V regulator on a DevKit V1 can sag with the TFT at full brightness — and the MAX30102's two LED pulse channels add to the same rail | Check `esp_reset_reason()` for brownout during Stage 1; power the TFT from a separate 3.3V rail if needed; start PPG LEDs at 6.4 mA and cap below 12 mA until Stage 8's brownout check passes |
 | **R7** | No delivery guarantee — the mesh is fire-and-forget | `+TX` confirms *transmission*, not reception. Show "sent" not "delivered". App-level ACK is a possible Stage 9. |
+| **R8** | A knockoff MAX30102 can be missing registers or return a wrong/absent `REV_ID` — and on a bare read, a dead sensor and a dead bus look identical | Stage 4a checks part IDs before anything else, exactly the Stage 1a discipline; unknown IDs are treated as unsupported, not guessed at |
+| **R9** | Motion and ambient light corrupt the PPG waveform — SpO2 in particular is easy to compute *confidently and wrongly* | Values display only when the signal-quality gate passes; `FINGER OFF` state otherwise. The algorithm is graded on noisy captured fixtures in 4b, not just clean ones |
+| **R10** | Temperature and HR can read "fine" while the sensor is broken, because nothing cross-checks them | MAX30205 readback must sit in 35–42 °C at boot (4a); HR is only shown alongside a passing waveform gate, and a vitals row stuck at a constant value for >60 s is flagged as sensor-dead |
 
 Open question deferred to Stage 7: the nRF beacons `hello <n>` every 10 s
 ([reference/nrf.cpp:314](reference/nrf.cpp#L314)). The inbox should almost certainly

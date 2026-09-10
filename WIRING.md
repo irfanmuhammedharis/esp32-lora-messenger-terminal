@@ -158,11 +158,40 @@ but they can be removed.
 > came out (PLAN.md section 5).
 
 Freed by this change: **GPIO32, 33, 34, 35** — 32 and 33 are fully
-bidirectional and are the obvious place to hang anything added later.
+bidirectional. They no longer sit idle: the health sensors (section 5) take
+them as the I2C bus.
 
 ---
 
-## 5. nRF52840 link — 3 wires
+## 5. Health sensors — 4 wires (+1 optional)
+
+MAX30102 (heart rate + SpO2) and MAX30205 (body temperature), sharing one I2C
+bus. **The MAX30102 has no temperature sensor** — the MAX30205 is the
+temperature source (PLAN.md §2.3).
+
+```
+   MAX30102 / MAX30205 breakouts           ESP32 DevKit V1
+   ┌─────────────────────────┐
+   │  SDA  ──────────────────┼──────────────►  GPIO32  (I2C data)
+   │  SCL  ──────────────────┼──────────────►  GPIO33  (I2C clock)
+   │  3V3  ──────────────────┼──────────────►  3V3     (ESP32's own rail —
+   │  GND  ──────────────────┼──────────────►  GND      NOT the shield's)
+   │  INT  ──── leave off for now; later: GPIO35 + external 4.7 kΩ pull-up
+   └─────────────────────────┘
+```
+
+Why not the default pins: ESP32 `Wire` defaults to GPIO21/22, and both are
+LCD_D2/D3 on this build — **`Wire.begin(32, 33)`**, never the defaults.
+
+Pull-ups: most breakouts carry the 4.7 kΩ pair on board; Stage 4a's I2C scan
+proves it. If the scan finds nothing, add 4.7 kΩ from SDA and SCL to 3V3.
+
+Addresses: MAX30102 = 0x57 (fixed), MAX30205 = 0x48 (A0–A2 low). Scan at
+100 kHz first, then 400 kHz.
+
+---
+
+## 6. nRF52840 link — 3 wires
 
 Cross-wired UART. **TX goes to RX**, and the grounds must be common or the
 line has no reference and you get garbage bytes.
@@ -189,7 +218,7 @@ See [PLAN.md](PLAN.md) §3.3.
 
 ---
 
-## 6. Build order
+## 7. Build order
 
 Wire only what the current stage needs — that is the whole point of the
 staged workflow in [PLAN.md](PLAN.md) §5.
@@ -201,6 +230,7 @@ staged workflow in [PLAN.md](PLAN.md) §5.
 | **2** touch | *nothing* — shares LCD lines | 15 wires |
 | **3** touch in LVGL | *nothing* — no input hardware at all | 15 wires |
 | **4** nRF link | TX, RX, GND | 18 wires |
+| **4a** health bring-up | SDA, SCL, 3V3, GND (+1 INT later) | 19 wires |
 
 ```bash
 pio run -e t1a_lcdid -t upload && pio device monitor   # then set the driver
@@ -209,7 +239,7 @@ pio run -e t1_display -t upload
 
 ---
 
-## 7. If it doesn't work
+## 8. If it doesn't work
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -224,4 +254,7 @@ pio run -e t1_display -t upload
 | Regular vertical stripes in the gradient | One data line not making contact | Stripe spacing names the bit: 2 px = D1, 16 px = D4 |
 | Image shifted or an edge missing | Wrong driver variant or panel size | Recheck the 1a verdict |
 | Random reboots, `ESP_RST_BROWNOUT` | Backlight + ESP32 exceeding the USB port | Power from a supply, not a laptop hub |
+| I2C scan finds no devices at all | Missing pull-ups, or powered from the shield's own 3V3 regulator | Use the ESP32's `3V3` pin; add 4.7 kΩ from SDA/SCL to 3V3 (§5) |
+| I2C scan finds 0x57 but `REV_ID` ≠ 0x15 | Knockoff or different chip behind the MAX30102 silkscreen | Trust the scan, not the label; treat unknown parts as unsupported |
+| MAX30205 reads a fixed or out-of-range value | Stuck temperature register, or address collision | Check A0–A2 are low (0x48); rescan (§5) |
 | Won't enter download mode | Something holding GPIO5 or GPIO15 low at boot | Both are strapping pins; unplug the shield and retry |
