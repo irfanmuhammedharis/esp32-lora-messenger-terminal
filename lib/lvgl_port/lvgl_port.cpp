@@ -118,6 +118,17 @@ bool lvglPortInit(TFT_eSPI &tft) {
     lv_display_set_buffers(s_disp, s_buf, nullptr, s_bufBytes,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
+    // Paint the bottom layer solid black. Whatever a transparent screen does
+    // not cover shows the bottom layer, which LVGL creates with no style at
+    // all - and on an RGB565 display LVGL does not clear the draw buffer
+    // first (lv_refr.c only does that for formats with alpha). Nothing gets
+    // drawn, so whatever the buffer last held is flushed across the panel.
+    // The idle blank makes the whole screen transparent (UI::applyBlank),
+    // so without this the "black" screen came out white.
+    lv_obj_t *bottom = lv_display_get_layer_bottom(s_disp);
+    lv_obj_set_style_bg_color(bottom, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bottom, LV_OPA_COVER, LV_PART_MAIN);
+
     return true;
 }
 

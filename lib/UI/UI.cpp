@@ -944,7 +944,9 @@ void UI::applyBlank(bool on) {
     // left this is the only way to wake, so it must not be lossy.
     lvglPortSetTouchSwallow(on);
     // No backlight control exists on this shield (it is hardwired to the
-    // shield's own 3.3 V rail), so "blank" means painting the panel black.
+    // shield's own 3.3 V rail), so "blank" means painting the panel black:
+    // the screen goes transparent and the port's black bottom layer shows
+    // through (lvglPortInit - without it the panel came out white).
     // That saves no power here, but it does stop a lit screen giving away a
     // position at night. PLAN.md section 2.
     if (scr_) {
