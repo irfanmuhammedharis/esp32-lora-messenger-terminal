@@ -51,6 +51,13 @@ static void copyCapped(char *dst, const char *src) {
     dst[i] = '\0';
 }
 
+bool isBeacon(const LinkEvent &ev) {
+    const char *p = ev.text;
+    long seq;
+    if (!eat(p, "hello ") || !parseInt(p, seq)) return false;
+    return *p == '\0' && seq == ev.seq;
+}
+
 // ── Line assembly ───────────────────────────────────────────────────────────
 
 void LoraLinkParser::reset() {
@@ -80,6 +87,15 @@ bool LoraLinkParser::feed(char c, LinkEvent &out) {
         }
 
         if (parseLine(out)) {
+            // The nRF prints each event twice, as a log line and then its
+            // Path B twin (LoraLink.h). Only the first copy is an event.
+            // Nothing legitimate repeats back to back: the nRF drops repeated
+            // (src, seq) frames itself, and its own TX seq only ever counts up.
+            if (out.type == last_.type && out.src == last_.src &&
+                out.seq == last_.seq && strcmp(out.text, last_.text) == 0) {
+                return false;
+            }
+            last_ = out;
             events_++;
             return true;
         }
@@ -198,10 +214,23 @@ bool LoraLinkParser::parsePathA(const char *line, LinkEvent &out) {
 // ── Device-side wrapper ─────────────────────────────────────────────────────
 #ifdef ARDUINO
 
+#include <driver/gpio.h>
+
 #include "pins.h"
 
 void LoraLink::begin() {
     Serial2.begin(NRF_BAUD, SERIAL_8N1, PIN_NRF_RX, PIN_NRF_TX);
+
+    // Hold RX high while the nRF is unplugged. A floating pin picks up noise,
+    // and noise that happens to contain a newline reads as an nRF line and
+    // keeps the link state UP (pins.h).
+    gpio_pullup_en(static_cast<gpio_num_t>(PIN_NRF_RX));
+
+    // Until now our TX pin was an undriven input (that is its reset state),
+    // so the nRF may be holding a partial line of noise. End it here, or it
+    // swallows the first real message as its tail.
+    Serial2.print('\n');
+
     parser_.reset();
     lastLine_ = millis();
     everSeen_ = false;
@@ -245,8 +274,9 @@ void LoraLink::pumpQueue(uint32_t nowMs) {
     if (qCount_ == 0) return;
     if (nowMs - lastTx_ < NRF_TX_GAP_MS) return;
 
-    // The nRF's serial_poll() originates on '\n', so the newline IS the
-    // send command - nothing else is needed to frame it.
+    // The nRF's serial_poll() originates on '\n', but only for a line that
+    // starts with NRF_SEND_PREFIX - see app_config.h for why.
+    Serial2.print(NRF_SEND_PREFIX);
     Serial2.print(queue_[qHead_]);
     Serial2.print('\n');
 

@@ -16,7 +16,7 @@
 //   [5] live RX             with the jumper off and the nRF wired, a genuine
 //                           +RX/log line parses within 30 s
 //
-// The first four need the jumper (GPIO17 -> GPIO16). The fifth needs it
+// The first four need the jumper (GPIO32 -> GPIO33). The fifth needs it
 // removed and the real node attached (WIRING.md section 6). A 5/5 verdict is
 // the Stage 4 sign-off; rerun this app whenever the link misbehaves.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ static bool sendLineAwaitRx(const char *line, uint32_t timeoutMs) {
 
 static void runBattery() {
     Serial.println();
-    Serial.println("[BATTERY] Fit the jumper: GPIO17 -> GPIO16.");
+    Serial.println("[BATTERY] Fit the jumper: GPIO32 -> GPIO33.");
     Serial.println("          Then anything that fails below is real.");
     delay(1500);
 

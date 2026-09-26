@@ -18,10 +18,10 @@ temperature from a MAX30205 — on a shared I2C bus.
    │  │ 4-wire resistive touch │  │◄────────►│  │ mesh_tx / handle_rx │  │
    │  │ (no controller)        │  │ 115200   │  │ TTL=3, dup-cache    │  │
    │  └────────────────────────┘  │  8N1     │  └──────────┬──────────┘  │
-   │  ┌────────────────────────┐  │          │             │             │
-   │  │ MAX30102  HR / SpO2    │  │          │        ((( LoRa )))       │
+   │  ┌────────────────────────┐  │ TX GPIO32│             │             │
+   │  │ MAX30102  HR / SpO2    │  │ RX GPIO33│        ((( LoRa )))       │
    │  │ MAX30205  body temp    │  │          │        865.1 MHz SF10     │
-   │  │ I2C on GPIO32/33       │  │          │                           │
+   │  │ I2C on GPIO21/22       │  │          │                           │
    │  └────────────────────────┘  │          │                           │
    │   touch is the only user     │          │                           │
    │   input; vitals ride I2C     │          │                           │
@@ -59,19 +59,21 @@ TFT_eSPI reads its configuration at compile time — `static_assert`s in
 |---|---|---|---|
 | LCD_D0 | 13 | `D8` | ⚠️ crossover · also touch **XP** |
 | LCD_D1 | 14 | `D9` | ⚠️ crossover · also touch **YM** |
-| LCD_D2…D7 | 21, 22, 23, 18, 19, 5 | `D2`…`D7` | |
+| LCD_D2, D3 | 16, 17 | `D2`, `D3` | moved off 21/22 to free them for I2C |
+| LCD_D4…D7 | 23, 18, 19, 5 | `D4`…`D7` | |
 | LCD_RD | 4 | `A0` | read strobe |
 | LCD_WR | 27 | `A1` | write strobe |
 | LCD_RS | 25 | `A2` | register select · also touch **XM**, ADC2_CH8 |
 | LCD_CS | 26 | `A3` | chip select · also touch **YP**, ADC2_CH9 |
 | LCD_RST | 15 | `A4` | |
-| UART2 TX → nRF RX | 17 | — | |
-| UART2 RX ← nRF TX | 16 | — | |
-| I2C SDA → MAX30102 + MAX30205 | 32 | — | health bus — see §2.3 |
-| I2C SCL → MAX30102 + MAX30205 | 33 | — | health bus — see §2.3 |
+| UART2 TX → nRF RX | 32 | — | to XIAO `D7` |
+| UART2 RX ← nRF TX | 33 | — | from XIAO `D6`; internal pull-up so it can't float |
+| I2C SDA → MAX30102 + MAX30205 | 21 | — | health bus — see §2.3 |
+| I2C SCL → MAX30102 + MAX30205 | 22 | — | health bus — see §2.3 |
 | MAX30102 INT | 35 | — | optional, input-only; open-drain → external pull-up |
+| *(reserved)* NEO-6M GPS NMEA in | 34 | — | UART1 RX only (`Serial1`), not yet wired — do not claim it for anything else |
 
-**The assignment is forced, not chosen.** Three constraints leave almost no
+**The assignment is forced, not chosen.** Four constraints leave almost no
 freedom:
 
 1. TFT_eSPI's ESP32 parallel driver writes all eight data lines with one
@@ -82,9 +84,24 @@ freedom:
    is why they are GPIO25/26 (ADC2_CH8/CH9) and not anything else. ADC2 is
    unusable while WiFi runs — free here, since this device never enables it.
 3. The health sensors need I2C: two bidirectional pins. The ESP32's default
-   `Wire` pins are GPIO21/22, and both are `LCD_D2`/`LCD_D3` here — so the
-   bus is constructed explicitly on GPIO32/33, the two clean pins the button
-   removal freed. An optional MAX30102 INT line can take GPIO35.
+   `Wire` pins are GPIO21/22 — the bus now uses exactly those, which only
+   works because the nRF link moved off UART2's default pins (GPIO16/17),
+   freeing 16/17 for `LCD_D2`/`LCD_D3` to move onto. An optional MAX30102
+   INT line still takes GPIO35.
+4. The nRF link runs UART2 on **GPIO32/33**. It spent a while on TX0/RX0
+   (GPIO1/3), which this DevKit hard-wires to its USB-serial bridge chip.
+   Uploads failed unless the nRF was unplugged, and the nRF radioed the
+   ESP32's boot log out as messages (WIRING.md §6). The `<32` rule is
+   specific to the LCD's parallel driver (one 32-bit GPIO register write
+   can't reach pins ≥ 32), not to UART, which is routed through the ESP32's
+   GPIO-to-peripheral matrix and reaches any pin. RX takes 33 rather than
+   input-only 34 because 33 has an internal pull-up, so an unplugged nRF
+   can't leave it floating.
+
+That leaves nothing spare below GPIO32 — every non-strapping pin under 32 is
+now spoken for. GPIO34 is reserved for a future NEO-6M GPS module. Its NMEA
+output is all a position fix needs, so one input-only pin on UART1
+(`Serial1`) is enough.
 
 Deliberately avoided: **GPIO6–11** (SPI flash, absent from this header),
 **GPIO12** (MTDI strapping — high at boot switches the flash regulator to
@@ -199,11 +216,11 @@ The terminal also measures its operator's vitals, locally:
 body sensor. That is why a MAX30205 sits on the same bus — the two share SDA,
 SCL, power and ground, and cost one extra I2C address.
 
-Why GPIO32/33: the ESP32's default `Wire` pins are GPIO21/22, and both are
-LCD_D2/D3 on this build. `Wire.begin(32, 33)` — the bus is explicit, and
-`pins.h` gains `PIN_I2C_SDA` / `PIN_I2C_SCL` as the single source of truth.
-Pull-ups: the breakouts normally carry the 4.7 kΩ pair; Stage 4a's I2C scan
-proves it either way.
+Why GPIO21/22: they are the ESP32's default `Wire` pins, usable here because
+LCD_D2/D3 moved to GPIO16/17 once the nRF link moved off those pins (§2). `Wire.begin()` is still called with `PIN_I2C_SDA`/`PIN_I2C_SCL` explicit
+rather than relying on the implicit default, so `pins.h` stays the single
+source of truth. Pull-ups: the breakouts normally carry the 4.7 kΩ pair;
+Stage 4a's I2C scan proves it either way.
 
 INT: the MAX30102's interrupt is open-drain active-low. The first cut polls
 the FIFO instead — one wire fewer, and LVGL already provides the between-frame
@@ -218,15 +235,33 @@ regulator is proven to hold (R6).
 
 ## 3. The ESP32 ↔ nRF52840 link protocol
 
-### 3.1 ESP32 → nRF (outgoing messages) — works today, no firmware change
+### 3.1 ESP32 → nRF (outgoing messages) — `+SEND,` framed
 
-`serial_poll()` in [reference/nrf.cpp:237](reference/nrf.cpp#L237) already does exactly
-what we need: it accumulates console characters and calls `originate()` on
-`\r` or `\n`. So the ESP32 just writes:
+`serial_poll()` in [reference/nrf.cpp:382](reference/nrf.cpp#L382) accumulates console
+characters and calls `originate()` on `\r` or `\n`, but only for a line that
+starts with `+SEND,`. It strips the prefix and sends the rest. So the ESP32
+writes:
 
 ```
-NEED REINFORCEMENT\n
++SEND,NEED REINFORCEMENT\n
 ```
+
+The prefix was added while the link ran on TX0 (GPIO1), which also carries
+the ESP32's ROM boot log and its `Serial` banner. The node sent each of
+those ~14 lines as a mesh message on every ESP32 reset. The link has since
+moved to GPIO32/33 (§2), and the prefix stays as a guard. The ESP32's TX pin
+is undriven from reset until `LoraLink::begin()`, and a loose wire can
+inject noise, so only a deliberate send reaches the air. `LoraLink::begin()`
+also writes a bare `\n` first, to end any partial line of noise the nRF may
+be holding.
+
+The nRF must take these bytes by **RX interrupt**, not `uart_poll_in()`.
+Polled, the nRF52840 UARTE holds one byte plus a few in its FIFO between
+main-loop passes (every 50 ms, none while a packet is on air). Every
+burst-sent `+SEND,` line was cut to its first few characters and lost its
+`\n`, so nothing the ESP32 sent ever went on air, even though the link
+showed UP. `serial_isr()` queues bytes into `ser_q`, and `SERIAL_RX_IRQ`
+keeps the USB CDC diag build on polling.
 
 **Hard constraint: `MAX_PAYLOAD_LEN` is 32 bytes**
 ([reference/nrf.cpp:32](reference/nrf.cpp#L32)). Characters past 32 on a line are
@@ -236,7 +271,7 @@ limit with a visible counter, and every preset string must fit.
 ### 3.2 nRF → ESP32 (incoming messages) — needs a decision
 
 Right now a received packet only surfaces as a *Zephyr log line*
-([reference/nrf.cpp:193](reference/nrf.cpp#L193)):
+([reference/nrf.cpp:329](reference/nrf.cpp#L329)):
 
 ```
 [00:00:12.345,000] <inf> lora_mesh: RX from node 2 seq 5 ttl 3 (RSSI -80 dBm, SNR 9 dB): sos
@@ -267,27 +302,66 @@ Two ways to consume that:
 **The parser is written against Path B and falls back to Path A**, so the
 project builds and runs either way — but Path B is what should ship.
 
-### 3.3 Required Zephyr-side configuration
+### 3.3 Required Zephyr-side configuration — **done**
 
 The console must be a **hardware UART**, not USB CDC ACM. `uart_dev` is
-`DT_CHOSEN(zephyr_console)` ([reference/nrf.cpp:75](reference/nrf.cpp#L75)), so on a
+`DT_CHOSEN(zephyr_console)` ([reference/nrf.cpp:82](reference/nrf.cpp#L82)), so on a
 board whose console is USB CDC (Xiao nRF52840, nRF52840 Dongle) the ESP32 can
-never reach it — the ESP32 cannot be a USB host. Needed in the nRF project:
+never reach it — the ESP32 cannot be a USB host.
 
-```
-# prj.conf
-CONFIG_LOG_MODE_IMMEDIATE=y        # no dropped/deferred lines
-CONFIG_LOG_BACKEND_SHOW_COLOR=n    # no ANSI escapes to parse around
-CONFIG_UART_CONSOLE=y
-```
+The firmware lives at `~/ncs/v3.4.0/zephyr/samples/drivers/lora/send/`
+(`reference/nrf.cpp` is a verbatim copy of its `src/main.c`, kept here so the
+ESP32 side can be read against it). `boards/xiao_ble_nrf52840_sense.overlay`
+and its matching `.conf` now carry:
 
 ```dts
-/* board overlay */
 / { chosen { zephyr,console = &uart0; }; };
 &uart0 { status = "okay"; current-speed = <115200>; };
 ```
 
-This is tracked as a Stage 4 task and is the single biggest integration risk.
+```
+CONFIG_BOARD_SERIAL_BACKEND_CDC_ACM=n   # or the board pulls USB back in
+CONFIG_USB_DEVICE_STACK=n
+CONFIG_UART_CONSOLE=y
+CONFIG_LOG_MODE_IMMEDIATE=y             # no dropped/deferred lines
+CONFIG_LOG_BACKEND_SHOW_COLOR=n         # no ANSI escapes to parse around
+```
+
+`CONFIG_BOARD_SERIAL_BACKEND_CDC_ACM=n` is the non-obvious one. The XIAO's
+`Kconfig.defconfig` sources `Kconfig.cdc_acm_serial.defconfig`, which turns
+the USB device stack back on by default — repointing `zephyr,console` alone
+leaves a USB stack running for nothing.
+
+Path B (§3.2) is implemented: `handle_rx()` and `originate()` each emit a
+`printk()` twin of their log line.
+
+### 3.4 Flashing a set — the three-device procedure
+
+Three identical sets exist. **The ESP32 firmware is identical on all three**
+— it owns nothing radio-shaped and has no identity. Only the nRF differs, by
+one Kconfig value:
+
+| Set | nRF node ID | Build directory |
+|---|---|---|
+| 1 | `CONFIG_MESH_NODE_ID=1` | `build` |
+| 2 | `CONFIG_MESH_NODE_ID=2` | `build_n2` |
+| 3 | `CONFIG_MESH_NODE_ID=3` | `build_n3` |
+
+IDs must be unique: `handle_rx()` discards any packet whose `src` equals its
+own `NODE_ID`, so two nodes sharing an ID are deaf to each other — and the
+symptom is silence, not an error.
+
+```bash
+# nRF — from ~/ncs/v3.4.0/zephyr/samples/drivers/lora/send
+west build -b xiao_ble/nrf52840/sense -d build_n2 -p always -- -DCONFIG_MESH_NODE_ID=2
+# double-tap RESET -> XIAO-SENSE drive appears -> copy build_n2/send/zephyr/zephyr.uf2
+
+# ESP32 — from the project root, same binary for every set
+pio run -e app -t upload --upload-port /dev/ttyUSB0
+```
+
+The nRF can stay wired while the ESP32 is flashed: the link is on
+GPIO32/33, clear of the USB-serial bridge on TX0/RX0 (WIRING.md §6).
 
 ---
 
@@ -421,13 +495,16 @@ conditions and must look different:
 
 | State | Meaning | Evidence |
 |---|---|---|
-| **LINK UP** | UART healthy *and* mesh traffic observed | a `+RX`/`+TX` (or parsed log line) within the last `NRF_LINK_TIMEOUT_MS` |
-| **SEARCHING FOR NETWORK** | UART healthy, no mesh traffic yet | lines (the nRF's beacons) arrive within the timeout, but no events — beacons only |
+| **LINK UP** | UART healthy *and* mesh traffic observed | a `+RX` (a peer's beacon included) or a `+TX` for a real message within the last `NRF_LINK_TIMEOUT_MS` |
+| **SEARCHING FOR NETWORK** | UART healthy, no mesh traffic yet | lines arrive within the timeout, but nothing from a peer — only our own node's beacon going out |
 | **LINK DOWN** | the UART itself is silent | no complete line for `NRF_LINK_TIMEOUT_MS` |
 
-The nRF beacons `hello <n>` every 10 s (`reference/nrf.cpp:314`), which makes
-the middle state *decidable rather than a guess*: a beacon proves the wire,
-and the absence of anything except beacons proves there is no peer to talk to.
+The nRF beacons `hello <n>` every 10 s (`reference/nrf.cpp:430`), which makes
+the middle state *decidable rather than a guess*: our own beacon's `+TX`
+proves the wire, and the absence of anything except our own beacon proves
+there is no peer to talk to. A *peer's* beacon arriving as `+RX` is the
+opposite evidence - a peer is in range - so it ends SEARCHING even though it
+is never shown as a message.
 
 **LINK DOWN is reserved for a fault the operator can act on** — wiring, power,
 or the console still on USB CDC (PLAN.md §3.3). **SEARCHING FOR NETWORK is a
@@ -437,9 +514,12 @@ will sit in SEARCHING indefinitely, and that is correct operation.
 
 Implementation note: `LoraLink::linkUp()` already measures exactly the UART
 liveness half (any complete line refreshes `lastLine_`, including beacons).
-What the UI needs on top is one flag, *mesh traffic seen*, set by any Rx or
-TxConfirm event — never by a beacon — and reset on the same timeout as the
-UART. The state is then the pair (uart alive, traffic seen).
+What the UI needs on top is one flag, *mesh traffic seen*, set by any Rx event
+(a peer's beacon included) or a TxConfirm for a real message — never by our
+own beacon's TxConfirm — and reset on the same timeout as the UART. The state
+is then the pair (uart alive, traffic seen). `isBeacon()` in `LoraLink.h`
+decides what is a beacon: exactly `hello <seq>` with the event's own seq, so
+a real message that starts with "hello" is not swallowed.
 
 Vitals update on two clocks that must not meet. The sensor FIFO is drained at
 100 Hz into a ring buffer by the port layer, while the screen redraws its
@@ -604,7 +684,7 @@ new thing in the system is one function call replacing the fake generator.
 
 | | Risk | Mitigation |
 |---|---|---|
-| **R1** | **nRF console is on USB CDC**, so the ESP32 can never reach it | Zephyr overlay repointing `zephyr,console` to `uart0`. Blocks Stage 4 — resolve early. |
+| **R1** | ~~**nRF console is on USB CDC**, so the ESP32 can never reach it~~ **RESOLVED** | Overlay repoints `zephyr,console` to `uart0` (XIAO D6/D7), and `CONFIG_BOARD_SERIAL_BACKEND_CDC_ACM=n` stops the board defconfig reinstating USB. See §3.3. |
 | **R2** | 32-byte payload cap silently truncates messages | Enforce in the compose UI with a live counter; unit-test the boundary |
 | **R3** | **Unknown LCD controller.** A wrong `*_DRIVER` flag looks exactly like a wiring fault | Stage 1a identifies it empirically before any driver is compiled |
 | **R11** | The UART carries no integrity check — a dropped or corrupted byte silently mangles a message | Line-based framing with on-screen counters; Stage 4's 10 min soak and the 4x diagnostic require zero errors; lines that fail to parse are counted, never shown |
@@ -621,5 +701,5 @@ new thing in the system is one function call replacing the fake generator.
 | **R10** | Temperature and HR can read "fine" while the sensor is broken, because nothing cross-checks them | MAX30205 readback must sit in 35–42 °C at boot (4a); HR is only shown alongside a passing waveform gate, and a vitals row stuck at a constant value for >60 s is flagged as sensor-dead |
 
 Open question deferred to Stage 7: the nRF beacons `hello <n>` every 10 s
-([reference/nrf.cpp:314](reference/nrf.cpp#L314)). The inbox should almost certainly
+([reference/nrf.cpp:430](reference/nrf.cpp#L430)). The inbox should almost certainly
 filter these into the Status screen rather than showing them as messages.

@@ -35,12 +35,19 @@ LOG_MODULE_REGISTER(lora_mesh);
 /* Send one of our own beacon packets this often */
 #define ORIGINATE_INTERVAL_MS	10000
 /*
- * Longest single listen before we come up for air to service the serial
- * bridge. The radio sits in receive for the whole slice, so it is deaf only
- * during its own transmissions; a shorter slice just makes a queued serial
- * line go out sooner. This is as close to full-duplex as one radio allows.
+ * How often the main loop comes up for air to service the serial bridge.
+ *
+ * This is NOT a radio listen window. The radio receives continuously through
+ * lora_recv_async() (see rx_start()) and is deaf only during its own
+ * transmissions; received frames queue up in rx_q until the loop takes them.
+ *
+ * It used to be one: a blocking lora_recv() per 250 ms slice. That can never
+ * receive anything here - every frame is longer on air than the slice (a
+ * 12-byte beacon is ~289 ms at SF10/125 kHz), and on each timeout the driver
+ * puts the radio to sleep, discarding the frame in flight. Two nodes running
+ * that build transmitted fine and heard each other 0% of the time.
  */
-#define LISTEN_SLICE_MS		250
+#define POLL_PERIOD_MS		50
 
 /*
  * LBT (listen-before-talk) is our collision avoidance for forwards. A relay
@@ -75,17 +82,91 @@ static const struct device *const lora_dev = DEVICE_DT_GET(DEFAULT_RADIO_NODE);
 static const struct device *const uart_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
 static struct lora_modem_config config;
 static bool radio_is_tx;
+static bool rx_on;
+
+/*
+ * A received frame, handed from the radio's RX callback (system workqueue)
+ * to the main loop, which does the parsing, printing and forwarding.
+ */
+struct rx_frame {
+	int16_t rssi;
+	int8_t snr;
+	uint8_t len;
+	uint8_t data[MAX_DATA_LEN];
+};
+
+K_MSGQ_DEFINE(rx_q, sizeof(struct rx_frame), 4, 4);
 
 /* Sequence number for packets this node originates (beacon and serial) */
 static uint16_t tx_seq;
 
 /*
- * Serial bridge line assembly. Filled by polling the console UART from the
- * main loop (uart_poll_in), so there is no ISR and no shared-state locking,
- * and nothing touches the console's interrupt/TX path.
+ * Serial bridge input. On the production UART0 console the RX interrupt
+ * moves every byte into ser_q, and the main loop parses from there.
+ *
+ * Polling the UARTE directly (uart_poll_in) is not enough: between polls it
+ * holds one byte plus the peripheral's small RX FIFO, and the main loop only
+ * polls every POLL_PERIOD_MS - never while a packet is on air. The ESP32
+ * sends a whole "+SEND,..." line in one burst, so each line was cut to its
+ * first few characters, lost its '\n', and nothing ever went on air.
+ *
+ * The diagnostic build's console is USB CDC ACM, which buffers input itself
+ * and whose output stopped when the app installed an IRQ callback on it, so
+ * that build keeps polling.
  */
+#define SERIAL_RX_IRQ (IS_ENABLED(CONFIG_UART_INTERRUPT_DRIVEN) && \
+	!DT_NODE_HAS_COMPAT(DT_CHOSEN(zephyr_console), zephyr_cdc_acm_uart))
+
+#if SERIAL_RX_IRQ
+/* Holds the ESP32's whole TX queue (8 lines, up to 39 bytes each) while a
+ * packet is on air and the main loop is not draining it.
+ */
+K_MSGQ_DEFINE(ser_q, sizeof(uint8_t), 512, 1);
+
+static void serial_isr(const struct device *dev, void *user_data)
+{
+	uint8_t c;
+
+	ARG_UNUSED(user_data);
+
+	if (!uart_irq_update(dev) || !uart_irq_rx_ready(dev)) {
+		return;
+	}
+
+	while (uart_fifo_read(dev, &c, 1) == 1) {
+		/* On overflow the byte is dropped; the line logic resyncs on '\n' */
+		(void)k_msgq_put(&ser_q, &c, K_NO_WAIT);
+	}
+}
+#endif
+
+static bool serial_getc(uint8_t *c)
+{
+#if SERIAL_RX_IRQ
+	return k_msgq_get(&ser_q, c, K_NO_WAIT) == 0;
+#else
+	return uart_poll_in(uart_dev, c) == 0;
+#endif
+}
+
+/*
+ * Serial bridge line assembly, done in the main loop only, so the line state
+ * below needs no locking.
+ *
+ * Only lines that start with SEND_PREFIX go on air, with the prefix stripped.
+ * It was added while the ESP32 drove this wire from its TX0 pin, which also
+ * carries its ROM boot log and startup banner - without the prefix, every one
+ * of those lines went out as a mesh message. The ESP32 side has since moved
+ * off TX0; the prefix stays so nothing but a deliberate send (not line
+ * noise, not a loose wire) goes on air.
+ */
+#define SEND_PREFIX	"+SEND,"
+#define SEND_PREFIX_LEN	(sizeof(SEND_PREFIX) - 1)
+
 static uint8_t line_buf[MAX_PAYLOAD_LEN];
 static uint8_t line_len;
+static uint8_t prefix_len;	/* chars of SEND_PREFIX matched on this line */
+static bool line_rejected;	/* line did not start with SEND_PREFIX */
 
 /*
  * Returns true if (src, seq) was already handled. Otherwise records it and
@@ -126,6 +207,55 @@ static int radio_set_tx(bool tx)
 	return 0;
 }
 
+/* Runs on the system workqueue for every frame received; the radio is
+ * already back in receive when it is called.
+ */
+static void rx_cb(const struct device *dev, uint8_t *data, uint16_t size,
+		  int16_t rssi, int8_t snr, void *user_data)
+{
+	/* Callbacks are serialised, so one static frame keeps this off the stack */
+	static struct rx_frame f;
+
+	ARG_UNUSED(dev);
+	ARG_UNUSED(user_data);
+
+	f.len = MIN(size, sizeof(f.data));
+	memcpy(f.data, data, f.len);
+	f.rssi = rssi;
+	f.snr = snr;
+
+	if (k_msgq_put(&rx_q, &f, K_NO_WAIT) != 0) {
+		LOG_WRN("RX queue full, frame dropped");
+	}
+}
+
+/* Receive continuously until rx_stop(); frames arrive through rx_cb(). */
+static int rx_start(void)
+{
+	int ret;
+
+	ret = radio_set_tx(false);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = lora_recv_async(lora_dev, rx_cb, NULL);
+	if (ret < 0) {
+		LOG_ERR("LoRa receive start failed (%d)", ret);
+		return ret;
+	}
+
+	rx_on = true;
+	return 0;
+}
+
+static void rx_stop(void)
+{
+	/* The radio must be idle before it can be reconfigured for TX */
+	(void)lora_recv_async(lora_dev, NULL, NULL);
+	rx_on = false;
+}
+
 static int mesh_tx(uint8_t src, uint16_t seq, uint8_t ttl,
 		   const uint8_t *payload, uint8_t payload_len)
 {
@@ -143,8 +273,11 @@ static int mesh_tx(uint8_t src, uint16_t seq, uint8_t ttl,
 	hdr->seq = seq;
 	memcpy(frame + sizeof(*hdr), payload, payload_len);
 
+	rx_stop();
+
 	ret = radio_set_tx(true);
 	if (ret < 0) {
+		(void)rx_start();
 		return ret;
 	}
 
@@ -152,11 +285,14 @@ static int mesh_tx(uint8_t src, uint16_t seq, uint8_t ttl,
 	for (int i = 0; i <= TX_BUSY_RETRIES; i++) {
 		ret = lora_send(lora_dev, frame, sizeof(*hdr) + payload_len);
 		if (ret != -EBUSY) {
-			return ret;
+			break;
 		}
 		LOG_DBG("Channel busy, retry %d", i + 1);
 		k_sleep(K_MSEC(TX_BUSY_BACKOFF_MS));
 	}
+
+	/* Straight back to listening; the main loop retries if this fails */
+	(void)rx_start();
 
 	return ret;
 }
@@ -193,6 +329,13 @@ static void handle_rx(uint8_t *frame, uint16_t len, int16_t rssi, int8_t snr)
 	LOG_INF("RX from node %u seq %u ttl %u (RSSI %d dBm, SNR %d dB): %s",
 		hdr->src, hdr->seq, hdr->ttl, rssi, snr, msg);
 
+	/*
+	 * Machine-readable twin of the line above, for the ESP32 front-end.
+	 * It survives log reformatting, colour and level changes; the front-end
+	 * ignores everything that does not start with '+'.
+	 */
+	printk("+RX,%u,%u,%d,%d,%s\n", hdr->src, hdr->seq, rssi, snr, msg);
+
 	if (hdr->ttl <= 1) {
 		LOG_INF("TTL expired, not forwarding");
 		return;
@@ -224,25 +367,40 @@ static void originate(const uint8_t *payload, uint8_t payload_len)
 		LOG_ERR("LoRa send failed");
 	} else {
 		LOG_INF("TX own seq %u: %s", tx_seq, text);
+		/* Confirms TRANSMISSION only - the mesh is fire-and-forget. */
+		printk("+TX,%u,%s\n", tx_seq, text);
 	}
 
 	tx_seq++;
 }
 
 /*
- * Drain any characters typed on the console (non-blocking) and, on a newline,
- * originate the assembled line over LoRa. Polled from the main loop so it
- * never touches the console's interrupt or TX path.
+ * Drain any characters received on the console (non-blocking) and, on a
+ * newline, originate the assembled line over LoRa if it was a SEND_PREFIX
+ * command. Called from the main loop.
  */
 static void serial_poll(void)
 {
 	uint8_t c;
 
-	while (uart_poll_in(uart_dev, &c) == 0) {
+	while (serial_getc(&c)) {
 		if (c == '\r' || c == '\n') {
-			if (line_len > 0) {
+			if (line_rejected) {
+				LOG_WRN("Ignored serial line without " SEND_PREFIX
+					" prefix");
+			} else if (line_len > 0) {
 				originate(line_buf, line_len);
-				line_len = 0;
+			}
+			line_len = 0;
+			prefix_len = 0;
+			line_rejected = false;
+		} else if (line_rejected) {
+			/* Not a send command - discard until the next line */
+		} else if (prefix_len < SEND_PREFIX_LEN) {
+			if (c == SEND_PREFIX[prefix_len]) {
+				prefix_len++;
+			} else {
+				line_rejected = true;
 			}
 		} else if (line_len < sizeof(line_buf)) {
 			line_buf[line_len++] = c;
@@ -253,11 +411,10 @@ static void serial_poll(void)
 
 int main(void)
 {
-	uint8_t rx_buf[MAX_DATA_LEN];
+	/* Static: main's stack is 1 KB and a frame is 260 bytes */
+	static struct rx_frame f;
 	int64_t next_originate;
-	int16_t rssi;
-	int8_t snr;
-	int ret, len;
+	int ret;
 
 #ifdef CONFIG_USB_DEVICE_STACK
 	/* Console runs over USB CDC ACM on this board */
@@ -295,6 +452,12 @@ int main(void)
 	if (!device_is_ready(uart_dev)) {
 		LOG_WRN("%s not ready, serial bridge disabled", uart_dev->name);
 	}
+#if SERIAL_RX_IRQ
+	else {
+		uart_irq_callback_user_data_set(uart_dev, serial_isr, NULL);
+		uart_irq_rx_enable(uart_dev);
+	}
+#endif
 
 	LOG_INF("Mesh node %u started, TTL %u", NODE_ID, MESH_TTL);
 
@@ -302,7 +465,13 @@ int main(void)
 
 	while (1) {
 		int64_t now = k_uptime_get();
-		int64_t listen_ms;
+		int64_t wait_ms;
+
+		/* A failed restart after TX would otherwise leave us deaf for good */
+		if (!rx_on && rx_start() < 0) {
+			k_sleep(K_MSEC(100));
+			continue;
+		}
 
 		/* Serial bridge: send any line typed on the console */
 		serial_poll();
@@ -318,29 +487,15 @@ int main(void)
 			continue;
 		}
 
-		ret = radio_set_tx(false);
-		if (ret < 0) {
-			k_sleep(K_MSEC(100));
-			continue;
-		}
-
 		/*
-		 * Listen until the next beacon is due, but never for longer than
-		 * one slice, so a line typed on the console is picked up promptly.
+		 * Wait for a received frame until the next beacon is due, but come
+		 * up for air every POLL_PERIOD_MS so a typed line goes out promptly.
+		 * The radio keeps listening throughout.
 		 */
-		listen_ms = MIN(next_originate - now, (int64_t)LISTEN_SLICE_MS);
-		len = lora_recv(lora_dev, rx_buf, sizeof(rx_buf),
-				K_MSEC(listen_ms), &rssi, &snr);
-		if (len == -EAGAIN) {
-			continue;	/* Slice/beacon timeout, re-evaluate */
+		wait_ms = MIN(next_originate - now, (int64_t)POLL_PERIOD_MS);
+		if (k_msgq_get(&rx_q, &f, K_MSEC(wait_ms)) == 0) {
+			handle_rx(f.data, f.len, f.rssi, f.snr);
 		}
-		if (len < 0) {
-			LOG_ERR("LoRa receive failed (%d)", len);
-			k_sleep(K_MSEC(100));
-			continue;
-		}
-
-		handle_rx(rx_buf, len, rssi, snr);
 	}
 
 	return 0;

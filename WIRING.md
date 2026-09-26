@@ -68,8 +68,8 @@ whatever "D0/D1" suggests.
 | `A4` | LCD_RST | **15** | |
 | `D8` | LCD_**D0** | **13** | ⚠️ note the crossover · also touch **XP** |
 | `D9` | LCD_**D1** | **14** | ⚠️ note the crossover · also touch **YM** |
-| `D2` | LCD_D2 | **21** | |
-| `D3` | LCD_D3 | **22** | |
+| `D2` | LCD_D2 | **16** | moved off 21 to free it for I2C (§5) |
+| `D3` | LCD_D3 | **17** | moved off 22 to free it for I2C (§5) |
 | `D4` | LCD_D4 | **23** | |
 | `D5` | LCD_D5 | **18** | |
 | `D6` | LCD_D6 | **19** | |
@@ -93,8 +93,8 @@ whatever "D0/D1" suggests.
    │    A4  LCD_RST ──────────────────┼──────────────►  GPIO15    │ for touch
    │                                  │                           │
    │  DIGITAL                         │                           │
-   │    D2  LCD_D2  ──────────────────┼──────────────►  GPIO21    │
-   │    D3  LCD_D3  ──────────────────┼──────────────►  GPIO22    │
+   │    D2  LCD_D2  ──────────────────┼──────────────►  GPIO16    │
+   │    D3  LCD_D3  ──────────────────┼──────────────►  GPIO17    │
    │    D4  LCD_D4  ──────────────────┼──────────────►  GPIO23    │
    │    D5  LCD_D5  ──────────────────┼──────────────►  GPIO18    │
    │    D6  LCD_D6  ──────────────────┼──────────────►  GPIO19    │
@@ -158,8 +158,9 @@ but they can be removed.
 > came out (PLAN.md section 5).
 
 Freed by this change: **GPIO32, 33, 34, 35** — 32 and 33 are fully
-bidirectional. They no longer sit idle: the health sensors (section 5) take
-them as the I2C bus.
+bidirectional. GPIO35 is spoken for (section 5, MAX30102 INT), GPIO32/33
+carry the nRF link (section 6), and GPIO34 is **reserved for a future NEO-6M
+GPS module**, see section 7.
 
 ---
 
@@ -172,16 +173,20 @@ temperature source (PLAN.md §2.3).
 ```
    MAX30102 / MAX30205 breakouts           ESP32 DevKit V1
    ┌─────────────────────────┐
-   │  SDA  ──────────────────┼──────────────►  GPIO32  (I2C data)
-   │  SCL  ──────────────────┼──────────────►  GPIO33  (I2C clock)
+   │  SDA  ──────────────────┼──────────────►  GPIO21  (I2C data)
+   │  SCL  ──────────────────┼──────────────►  GPIO22  (I2C clock)
    │  3V3  ──────────────────┼──────────────►  3V3     (ESP32's own rail —
    │  GND  ──────────────────┼──────────────►  GND      NOT the shield's)
    │  INT  ──── leave off for now; later: GPIO35 + external 4.7 kΩ pull-up
    └─────────────────────────┘
 ```
 
-Why not the default pins: ESP32 `Wire` defaults to GPIO21/22, and both are
-LCD_D2/D3 on this build — **`Wire.begin(32, 33)`**, never the defaults.
+This is the ESP32's default `Wire` pin pair (GPIO21/22) — usable now because
+LCD_D2/D3 moved to GPIO16/17 (§2) to free them, since the nRF link moved off
+those pins (§6). `Wire.begin()` is still called with
+`PIN_I2C_SDA`/`PIN_I2C_SCL` explicit rather than relying on the implicit
+default, so [include/pins.h](include/pins.h) stays the one place pin numbers
+are written down.
 
 Pull-ups: most breakouts carry the 4.7 kΩ pair on board; Stage 4a's I2C scan
 proves it. If the scan finds nothing, add 4.7 kΩ from SDA and SCL to 3V3.
@@ -197,24 +202,51 @@ Cross-wired UART. **TX goes to RX**, and the grounds must be common or the
 line has no reference and you get garbage bytes.
 
 ```
-   ESP32 (3.3 V)                          nRF52840 (3.3 V)
-   ┌────────────┐                         ┌────────────┐
-   │  GPIO17    │──────────────────────►  │  RX        │
-   │  (TX2)     │                         │            │
-   │  GPIO16    │  ◄──────────────────────│  TX        │
-   │  (RX2)     │                         │            │
-   │  GND       │─────────────────────────│  GND       │
-   └────────────┘                         └────────────┘
+   ESP32 (3.3 V)                    XIAO nRF52840 + Wio-SX1262 (3.3 V)
+   ┌────────────┐                         ┌────────────────────┐
+   │  GPIO32    │──────────────────────►  │  D7  RX  (P1.12)   │
+   │  (TX2)     │                         │                    │
+   │  GPIO33    │  ◄──────────────────────│  D6  TX  (P1.11)   │
+   │  (RX2)     │                         │                    │
+   │  GND       │─────────────────────────│  GND               │
+   └────────────┘                         └────────────────────┘
                     115200 8N1
 ```
+
+On the 30-pin DOIT board, `D32` and `D33` sit next to each other on the
+header row that starts at `EN`, between `D35` and `D25`.
+
+**D6/D7 are the only XIAO pins left.** The Wio-SX1262 takes D1–D5 (IRQ,
+NRESET, BUSY, NSS, RXEN) and D8–D10 (SPI), so `uart0` — whose default pinctrl
+is exactly P1.11/P1.12 — lands on the two that remain. Nothing had to be
+moved to make this fit.
 
 Both parts are 3.3 V logic — no level shifter. If the nRF has its own supply,
 connect **grounds only**, not power.
 
-⚠️ **This link cannot work until the nRF's Zephyr console is moved off USB CDC
-onto a hardware UART.** `uart_dev` is `DT_CHOSEN(zephyr_console)`
-([reference/nrf.cpp:75](reference/nrf.cpp#L75)) and the ESP32 cannot act as a USB host.
-See [PLAN.md](PLAN.md) §3.3.
+**The nRF stays wired while you flash.** The link used to sit on TX0/RX0
+(GPIO1/3), which this DevKit hard-wires to its USB-serial bridge chip. The
+nRF then fought that chip for GPIO3: uploads failed with "The serial TX path
+seems to be down" unless the nRF was unplugged. The nRF also radioed the
+ESP32's boot log out as messages. On GPIO32/33 neither happens, and the
+`Serial` monitor on USB is a clean debug console again.
+
+The ESP32 enables GPIO33's internal pull-up, so RX idles high when the nRF
+is unplugged. The node only sends lines that start with `+SEND,`
+([PLAN.md](PLAN.md) §3.1), so noise on the wire during an ESP32 reset never
+reaches the air.
+
+✅ **The nRF console now lives on `uart0`, not USB CDC** — `uart_dev` is
+`DT_CHOSEN(zephyr_console)` ([reference/nrf.cpp:82](reference/nrf.cpp#L82)), so the
+console *is* this link, and the ESP32 cannot act as a USB host. The board
+overlay and its `.conf` in the Zephyr sample carry the change; see
+[PLAN.md](PLAN.md) §3.3 for the exact settings and §3.4 for the per-set
+flashing procedure.
+
+> The nRF therefore no longer enumerates a serial port on a PC. That is
+> expected, not a fault — the only window onto it is the ESP32, or a USB-TTL
+> adapter clipped onto D6/D7. UF2 flashing is unaffected, because that USB
+> belongs to the bootloader rather than to this application.
 
 **Verify before trusting the link** (Stage 4, PLAN.md §5): a line typed on
 the ESP32 appears on air at the far node (**TX**), the nRF's `+RX` lines land
@@ -222,9 +254,56 @@ in the ESP32 inbox (**RX**), 100 round-trip pings come back in order with
 zero loss, then a 10-minute soak with zero framing errors. The `t4x_linkdiag`
 environment re-runs this battery on demand.
 
+**Reading the link indicator (PLAN.md §4.1a):** the UI reports one of three
+states, not a simple up/down, because a silent UART and a healthy UART with
+no peer in range look identical unless something distinguishes them:
+
+| State | Wiring implication |
+|---|---|
+| **LINK UP** | TX/RX/GND all good, and a second mesh node is in range |
+| **SEARCHING FOR NETWORK** | TX/RX/GND are wired correctly — the nRF's `hello` beacons are getting through — there is just no peer to talk to yet. **Not a wiring fault**, do not re-check the wires for this. |
+| **LINK DOWN** | the UART itself is silent — this is the wiring fault. Recheck the TX↔RX cross, GND, and that the nRF console has been moved off USB CDC (PLAN.md §3.3) |
+
+A single unpaired device will sit in **SEARCHING FOR NETWORK** indefinitely.
+That is correct operation, not a symptom to chase.
+
 ---
 
-## 7. Build order
+## 7. Future expansion — NEO-6M GPS (reserved, not wired)
+
+Not part of the current build. GPIO34 is held in reserve so nothing else
+claims it first. (This reservation was GPIO32/33 until the nRF link needed
+them, §6.)
+
+```
+   NEO-6M GPS module                       ESP32 DevKit V1
+   ┌─────────────────────────┐
+   │  TX  ────────────────────┼──────────────►  GPIO34  (RX, UART1)
+   │  RX  ──── leave off — no output pin is left to drive it
+   │  VCC ────────────────────┼──────────────►  3V3
+   │  GND ────────────────────┼──────────────►  GND
+   └─────────────────────────┘
+                    9600 8N1 (module default)
+```
+
+One wire is enough. The module streams NMEA sentences on its own from power-up, and
+those carry the position fix. Its RX input only matters for reconfiguring
+the module, which the default settings don't need. GPIO34 is input-only,
+which is fine for a receive line. It has no pull-up, but NMEA sentences
+carry a checksum, so noise with no module fitted is rejected. It gets its own
+peripheral, UART1, untouched by anything else in the project:
+
+```cpp
+Serial1.begin(9600, SERIAL_8N1, /*rx=*/34, /*tx=*/-1);
+```
+
+Like every other GPIO, once this module is actually wired its pin belongs in
+[include/pins.h](include/pins.h) as `PIN_GPS_RX`, not hardcoded at the call
+site.
+
+---
+
+## 8. Build order
 
 Wire only what the current stage needs — that is the whole point of the
 staged workflow in [PLAN.md](PLAN.md) §5.
@@ -245,7 +324,7 @@ pio run -e t1_display -t upload
 
 ---
 
-## 8. If it doesn't work
+## 9. If it doesn't work
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -264,3 +343,5 @@ pio run -e t1_display -t upload
 | I2C scan finds 0x57 but `REV_ID` ≠ 0x15 | Knockoff or different chip behind the MAX30102 silkscreen | Trust the scan, not the label; treat unknown parts as unsupported |
 | MAX30205 reads a fixed or out-of-range value | Stuck temperature register, or address collision | Check A0–A2 are low (0x48); rescan (§5) |
 | Won't enter download mode | Something holding GPIO5 or GPIO15 low at boot | Both are strapping pins; unplug the shield and retry |
+| Link indicator stuck on `LINK DOWN` | UART wiring fault, or nRF console still on USB CDC | Recheck TX↔RX cross and common GND (§6); confirm the nRF build moved the console off USB CDC (PLAN.md §3.3) |
+| Link indicator stuck on `SEARCHING FOR NETWORK` | Wiring is fine — no peer node in range | Not a wiring fault; bring a second mesh node in range (§6) |

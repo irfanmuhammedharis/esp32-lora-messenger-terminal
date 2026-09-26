@@ -16,6 +16,14 @@
                                     // (Zephyr log lines are wordy; anything
                                     //  longer is discarded up to the newline)
 
+// Every message line to the nRF starts with this; the node ignores any line
+// that doesn't. It was added when the link shared TX0 with the ROM boot log,
+// which the node radioed out line by line. The link has since moved to
+// GPIO32 (pins.h), and the prefix stays so that only a deliberate send goes
+// on air - not noise from the undriven pin during an ESP32 reset, or from a
+// loose wire. Must match SEND_PREFIX in the nRF firmware (reference/nrf.cpp).
+#define NRF_SEND_PREFIX     "+SEND,"
+
 // Hard cap from reference/nrf.cpp:32 - MAX_PAYLOAD_LEN. Do not raise without
 // raising it there too.
 #define MSG_MAX_LEN         32
@@ -32,9 +40,9 @@
 #define NRF_TXQ_LEN         8
 
 // Minimum gap between lines handed to the nRF. Its serial_poll() assembles a
-// line per loop iteration between 250 ms listen slices, so pushing lines back
-// to back just fills its buffer; spacing them costs nothing and keeps the
-// node's own framing simple.
+// line per loop iteration - every 50 ms, longer while the radio is
+// transmitting - so pushing lines back to back just fills its buffer; spacing
+// them costs nothing and keeps the node's own framing simple.
 #define NRF_TX_GAP_MS       120
 
 // ── Message store ───────────────────────────────────────────────────────────

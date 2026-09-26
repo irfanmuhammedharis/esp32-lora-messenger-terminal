@@ -171,6 +171,69 @@ static void test_parser_recovers_after_overrun(void) {
     TEST_ASSERT_EQUAL_STRING("recovered", ev.text);
 }
 
+// ── Path A/B twins ──────────────────────────────────────────────────────────
+
+// How many events a string completes, for the twin tests below.
+static int countEvents(const char *s) {
+    int n = 0;
+    for (const char *c = s; *c; c++) {
+        LinkEvent ev;
+        if (p.feed(*c, ev)) n++;
+    }
+    return n;
+}
+
+// The live nRF (LOG_MODE_IMMEDIATE) prints the log line, then its Path B
+// twin. Seen on hardware as every "TX confirmed" arriving twice.
+static void test_tx_twin_is_one_event(void) {
+    TEST_ASSERT_EQUAL_INT(1, countEvents(
+        "[00:00:12.345,000] <inf> lora_mesh: TX own seq 4: SOS\n"
+        "+TX,4,SOS\n"));
+    TEST_ASSERT_EQUAL_UINT32(1, p.eventsParsed());
+}
+
+static void test_rx_twin_is_one_event(void) {
+    TEST_ASSERT_EQUAL_INT(1, countEvents(
+        "[00:00:12.345,000] <inf> lora_mesh: RX from node 2 seq 5 ttl 3 "
+        "(RSSI -80 dBm, SNR 9 dB): sos\n"
+        "[00:00:12.346,000] <inf> lora_mesh: Forwarded node 2 seq 5\n"
+        "+RX,2,5,-80,9,sos\n"));
+}
+
+// Only an identical event is a twin: a new seq, or the same seq from another
+// node, is a real event even when the text matches.
+static void test_distinct_events_are_not_merged(void) {
+    TEST_ASSERT_EQUAL_INT(4, countEvents(
+        "+TX,4,SOS\n"
+        "+TX,5,SOS\n"
+        "+RX,2,5,-80,9,SOS\n"
+        "+RX,3,5,-80,9,SOS\n"));
+}
+
+// ── Beacons ─────────────────────────────────────────────────────────────────
+
+static LinkEvent evWith(uint16_t seq, const char *text) {
+    LinkEvent ev;
+    ev.type = LinkEventType::Rx;
+    ev.seq  = seq;
+    strcpy(ev.text, text);
+    return ev;
+}
+
+static void test_beacon_is_hello_plus_own_seq(void) {
+    TEST_ASSERT_TRUE(isBeacon(evWith(19, "hello 19")));
+    TEST_ASSERT_TRUE(isBeacon(evWith(0, "hello 0")));
+}
+
+// A real message that merely starts with "hello" must reach the inbox.
+static void test_hello_message_is_not_a_beacon(void) {
+    TEST_ASSERT_FALSE(isBeacon(evWith(7, "hello team")));
+    TEST_ASSERT_FALSE(isBeacon(evWith(7, "hello 5")));      // seq mismatch
+    TEST_ASSERT_FALSE(isBeacon(evWith(7, "hello 7 back")));
+    TEST_ASSERT_FALSE(isBeacon(evWith(7, "hello")));
+    TEST_ASSERT_FALSE(isBeacon(evWith(7, "HELLO 7")));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
     RUN_TEST(test_pathB_rx);
@@ -187,5 +250,10 @@ int main(int, char **) {
     RUN_TEST(test_text_at_exactly_MSG_MAX_LEN);
     RUN_TEST(test_buffer_overrun_discards_the_line);
     RUN_TEST(test_parser_recovers_after_overrun);
+    RUN_TEST(test_tx_twin_is_one_event);
+    RUN_TEST(test_rx_twin_is_one_event);
+    RUN_TEST(test_distinct_events_are_not_merged);
+    RUN_TEST(test_beacon_is_hello_plus_own_seq);
+    RUN_TEST(test_hello_message_is_not_a_beacon);
     return UNITY_END();
 }

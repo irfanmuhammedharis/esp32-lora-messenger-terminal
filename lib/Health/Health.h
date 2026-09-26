@@ -199,7 +199,7 @@ private:
 // The two sensors plus the core, as one pollable unit.
 class HealthSensor {
 public:
-    // Wire up the bus on GPIO32/33 and bring both parts up. Returns false
+    // Wire up the bus on GPIO21/22 and bring both parts up. Returns false
     // if neither part answers - the app treats health as optional and keeps
     // running (radio is the core function; a missing sensor must not brick
     // the terminal). Individual presence is available from the getters.

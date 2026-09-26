@@ -3,7 +3,7 @@
 //
 // Two phases:
 //
-//   A  LOOPBACK   jumper GPIO17 -> GPIO16 (TX2 to RX2) and this proves the
+//   A  LOOPBACK   jumper GPIO32 -> GPIO33 (TX2 to RX2) and this proves the
 //                 UART, the pin mapping and the whole parser end to end with
 //                 no nRF attached at all. If this fails, nothing about the
 //                 radio node is worth investigating yet.
@@ -56,7 +56,7 @@ static void onLinkEvent(const LinkEvent &ev, void *) {
 // exactly what the native tests cannot catch.
 static bool phaseLoopback() {
     Serial.println();
-    Serial.println("[A] Loopback - jumper GPIO17 to GPIO16.");
+    Serial.println("[A] Loopback - jumper GPIO32 to GPIO33.");
 
     struct Probe { const char *line; const char *expectText; };
     static const Probe probes[] = {
@@ -102,7 +102,7 @@ static bool phaseLoopback() {
     const bool ok = (passed == expected);
     Serial.printf("    %u/%u probes behaved correctly.\n", passed, expected);
     if (!ok) {
-        Serial.println("    -> No jumper fitted? TX2=GPIO17 to RX2=GPIO16.");
+        Serial.println("    -> No jumper fitted? TX2=GPIO32 to RX2=GPIO33.");
         Serial.println("       If the jumper IS fitted, recheck those two pins.");
     }
     return ok;

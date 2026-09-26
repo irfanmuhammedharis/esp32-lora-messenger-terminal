@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Stage 4a — health bring-up: MAX30102 + MAX30205 on the I2C bus (GPIO32/33).
+// Stage 4a — health bring-up: MAX30102 + MAX30205 on the I2C bus (GPIO21/22).
 //             pio run -e t4a_health -t upload
 //
 // Exit criteria (PLAN.md section 5):
@@ -13,7 +13,7 @@
 // graded live: it cannot pass without a finger, and that is by design — the
 // whole point of the gate is that it refuses to invent a number.
 //
-// Wiring: WIRING.md section 5. SDA->GPIO32, SCL->GPIO33, 3V3 from the ESP32's
+// Wiring: WIRING.md section 5. SDA->GPIO21, SCL->GPIO22, 3V3 from the ESP32's
 // own rail, common ground. No INT line - the first cut polls the FIFO.
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 //
-// Device layer: MAX30102 + MAX30205 over I2C on GPIO32/33 (PLAN.md 2.3).
+// Device layer: MAX30102 + MAX30205 over I2C on GPIO21/22 (PLAN.md 2.3).
 //
 // Everything here is register I/O and timing. No signal processing lives in
 // this file - that is HealthCore's job - which is what keeps the algorithm
@@ -155,8 +155,8 @@ bool Max30205::readMilliC(int16_t *out) {
 // ── HealthSensor ────────────────────────────────────────────────────────────
 
 bool HealthSensor::begin(TwoWire &wire, int sda, int scl) {
-    // GPIO21/22 - Wire's own defaults - are LCD_D2/D3 on this build, so the
-    // bus is always explicit (PLAN.md 2.3).
+    // GPIO21/22 - Wire's own defaults, usable now that LCD_D2/D3 moved to
+    // GPIO16/17 - the bus is still constructed explicitly (PLAN.md 2.3).
     wire.begin(sda, scl);
     wire.setClock(400000);   // both parts are 400 kHz parts; the scan in
                              // Stage 4a proved the pull-ups can take it

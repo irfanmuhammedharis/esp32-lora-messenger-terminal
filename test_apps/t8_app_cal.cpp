@@ -153,11 +153,12 @@ static void onLinkEvent(const LinkEvent &ev, void *) {
 
     switch (ev.type) {
         case LinkEventType::Rx: {
-            // The node beacons "hello <n>" every 10 s (reference/nrf.cpp:314).
-            // Those are link liveness, not messages: showing them would bury
-            // real traffic under housekeeping. They still refresh the link
-            // timer, because merely receiving one proves the link is up.
-            if (strncmp(ev.text, "hello ", 6) == 0) {
+            // Every node beacons "hello <n>" every 10 s (reference/nrf.cpp:483).
+            // A peer's beacon is not a message - showing them would bury real
+            // traffic under housekeeping - but it is proof a peer is in range,
+            // so it counts as mesh traffic and ends SEARCHING (PLAN.md 4.1a).
+            if (isBeacon(ev)) {
+                lastTrafficMs = now;
                 Serial.printf("  [beacon] node %u seq %u\n", ev.src, ev.seq);
                 return;
             }
@@ -173,6 +174,15 @@ static void onLinkEvent(const LinkEvent &ev, void *) {
         }
 
         case LinkEventType::TxConfirm:
+            // Our own node's beacon going out proves nothing about peers - a
+            // lone node sends one every 10 s - so it is neither a sent
+            // message nor mesh traffic. Counting it kept a node with nobody
+            // in range at UP instead of SEARCHING.
+            if (isBeacon(ev)) {
+                Serial.printf("  [beacon] own seq %u sent\n", ev.seq);
+                return;
+            }
+
             // +TX confirms TRANSMISSION, not reception. The mesh is
             // fire-and-forget, so this is shown as "sent", never "delivered".
             // PLAN.md risk R7.
@@ -282,8 +292,11 @@ void loop() {
 
     // Three-state link model (PLAN.md 4.1a).
     const bool uartAlive = nrfLink.linkUp(now);
-    const bool trafficFresh = lastTrafficMs != 0 &&
-                              now - lastTrafficMs < NRF_LINK_TIMEOUT_MS;
+    // Signed: onLinkEvent() stamps lastTrafficMs with millis() during poll(),
+    // after `now`, and an unsigned wrap flashed SEARCHING (see src/main.cpp).
+    const bool trafficFresh =
+        lastTrafficMs != 0 &&
+        (int32_t)(now - lastTrafficMs) < (int32_t)NRF_LINK_TIMEOUT_MS;
     const LinkState st =
         !uartAlive    ? LinkState::Down
         : trafficFresh ? LinkState::Up

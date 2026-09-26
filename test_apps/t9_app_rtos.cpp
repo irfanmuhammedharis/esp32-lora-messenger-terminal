@@ -190,18 +190,22 @@ static void ensureCalibratedAndAligned() {
 //
 // Runs in radioTask context, invoked by nrfLink.poll(). The radio task must
 // not touch UI state, so real messages are handed to the UI task through the
-// queue. Beacons are dropped here - they are link liveness, not traffic, and
-// keeping them out of the queue saves the UI task work on every 10 s tick.
+// queue. Our own node's beacon is dropped here: a lone node sends one every
+// 10 s, so it proves nothing about peers and must not hold the link at UP. A
+// peer's beacon IS queued - it proves a peer is in range, so the UI task
+// counts it as traffic - but it is never stored as a message.
 // If the queue is full the event is dropped: the UI is behind, and on a
 // fire-and-forget mesh a newer message is always more valuable than an older
 // one. The link is still proven alive by the act of sending.
 static void onLinkEvent(const LinkEvent &ev, void *) {
     if (ev.type == LinkEventType::None) return;
 
-    if (ev.type == LinkEventType::Rx &&
-        strncmp(ev.text, "hello ", 6) == 0) {
+    if (isBeacon(ev)) {
+        if (ev.type == LinkEventType::TxConfirm) {
+            Serial.printf("  [beacon] own seq %u sent\n", ev.seq);
+            return;
+        }
         Serial.printf("  [beacon] node %u seq %u\n", ev.src, ev.seq);
-        return;
     }
 
     xQueueSend(s_eventQ, &ev, 0);
@@ -267,9 +271,10 @@ static void uiTask(void *) {
         //    never shows stale data.
         LinkEvent ev;
         while (xQueueReceive(s_eventQ, &ev, 0) == pdTRUE) {
+            lastTrafficMs = now;
+            if (isBeacon(ev)) continue;   // a peer's beacon: traffic, not a message
             if (ev.type == LinkEventType::Rx)         applyRx(ev, now);
             else if (ev.type == LinkEventType::TxConfirm) applyTx(ev, now);
-            lastTrafficMs = now;
         }
 
         // 2. Refresh link + telemetry for the header and Status screen.

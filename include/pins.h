@@ -27,7 +27,13 @@
 //   GPIO 12     MTDI strapping - high at boot sets the flash to 1.8V
 //   GPIO 2      onboard LED fights an input pull-up; strapping pin
 //
-// Still free: GPIO 2, 32, 33, 34, 35, 36, 39 (36/39 analog-only).
+// GPIO 1/3 (TX0/RX0) are left alone too: on this DevKit they are hard-wired
+// to the onboard USB-serial bridge chip that flashing and the Serial monitor
+// use. The nRF link sat there for a while and blocked both, so it moved to
+// GPIO32/33 (see the UART section below).
+//
+// Still free: GPIO 2, 34, 36, 39 (34/36/39 input-only). GPIO34 is earmarked
+// for a future NEO-6M GPS - see the Input section below.
 
 // ── Display: 8-bit parallel data bus ────────────────────────────────────────
 // NOTE the crossover: the shield's D8/D9 header pins carry LCD_D0/LCD_D1,
@@ -35,8 +41,9 @@
 // common reason a shield shows noise instead of an image.
 #define PIN_LCD_D0     13   // shield pin D8   (also touch XP)
 #define PIN_LCD_D1     14   // shield pin D9   (also touch YM)
-#define PIN_LCD_D2     21   // shield pin D2
-#define PIN_LCD_D3     22   // shield pin D3
+#define PIN_LCD_D2     16   // shield pin D2  - freed when the nRF link moved
+                             // off UART2's default pins 16/17 (see below)
+#define PIN_LCD_D3     17   // shield pin D3  - see PIN_LCD_D2 note
 #define PIN_LCD_D4     23   // shield pin D4
 #define PIN_LCD_D5     18   // shield pin D5
 #define PIN_LCD_D6     19   // shield pin D6
@@ -73,19 +80,39 @@
 // pull-up, and left floating one of them registered an 800 ms long press by
 // itself and fired a panic SOS. See PLAN.md section 5.
 //
-// Free as a result: GPIO32, 33, 34, 35 (32/33 fully bidirectional).
+// Free as a result: GPIO32, 33, 34, 35 (32/33 fully bidirectional). GPIO35 is
+// still spoken for below (PIN_MAX30102_INT), and GPIO32/33 now carry the nRF
+// link (UART section below).
+//
+// GPIO34 is reserved for a future NEO-6M GPS module - do not claim it for
+// anything else. A GPS only needs its NMEA output wire to report position, so
+// one input-only pin on UART1 is enough:
+// `Serial1.begin(9600, SERIAL_8N1, PIN_GPS_RX, -1)`. Noise while no module is
+// fitted is harmless, because every NMEA sentence carries a checksum.
+// Configuring the module (ESP32 -> GPS RX) would need an output pin, and none
+// is left. Not yet in use, so no PIN_GPS_* defines exist here yet.
 
 // ── UART2 link to the nRF52840 (cross-wired, plus a common ground) ──────────
-#define PIN_NRF_TX     17   // ESP32 TX  ->  nRF RX
-#define PIN_NRF_RX     16   // ESP32 RX  <-  nRF TX
+// GPIO32/33, not TX0/RX0: those are hard-wired to the USB-serial bridge, and
+// with the nRF on them uploads failed and the nRF radioed out the boot log.
+// Pins >= 32 are fine here. The <32 rule is the LCD driver's (one 32-bit GPIO
+// register write), while a UART reaches any pin through the GPIO matrix.
+//
+// RX is on 33 rather than input-only 34 because 33 has an internal pull-up
+// (LoraLink::begin() enables it). With the nRF unplugged the line idles high
+// instead of floating, so noise can't pose as nRF traffic - any complete
+// line counts as proof the link is alive.
+#define PIN_NRF_TX      32   // ESP32 TX  ->  nRF RX (XIAO D7)
+#define PIN_NRF_RX      33   // ESP32 RX  <-  nRF TX (XIAO D6)
 
 // ── I2C health bus: MAX30102 (HR/SpO2) + MAX30205 (body temp) ──────────────
-// The ESP32's default Wire pins are GPIO21/22, and both are LCD_D2/D3 on this
-// build, so the bus is constructed explicitly with Wire.begin(32, 33) and
-// never with the defaults. GPIO32/33 are the two clean bidirectional pins the
-// button removal freed (PLAN.md section 2.3).
-#define PIN_I2C_SDA      32
-#define PIN_I2C_SCL      33
+// Wired to the ESP32's default Wire pins, GPIO21/22 - previously avoided
+// because they doubled as LCD_D2/D3 (see above; the LCD lines moved to
+// 16/17 to free these for I2C). Wire.begin() is still called with these
+// pins explicit rather than relying on the implicit default, so pins.h
+// stays the single source of truth.
+#define PIN_I2C_SDA      21
+#define PIN_I2C_SCL      22
 #define PIN_MAX30102_INT 35   // optional; input-only pin, needs an external
                               // pull-up - the first cut polls the FIFO instead
 

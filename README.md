@@ -14,10 +14,10 @@ MAX30205.
    │  │ 4-wire resistive touch │  │◄────────►│  │ mesh_tx / handle_rx │  │
    │  │ (no controller)        │  │ 115200   │  │ TTL=3, dup-cache    │  │
    │  └────────────────────────┘  │  8N1     │  └──────────┬──────────┘  │
-   │  ┌────────────────────────┐  │          │             │             │
-   │  │ MAX30102  HR / SpO2    │  │          │        ((( LoRa )))       │
+   │  ┌────────────────────────┐  │ TX GPIO32│             │             │
+   │  │ MAX30102  HR / SpO2    │  │ RX GPIO33│        ((( LoRa )))       │
    │  │ MAX30205  body temp    │  │          │        865.1 MHz SF10     │
-   │  │ I2C on GPIO32/33       │  │          │                           │
+   │  │ I2C on GPIO21/22       │  │          │                           │
    │  └────────────────────────┘  │          │                           │
    │   touch is the only user     │          │                           │
    │   input; vitals ride I2C     │          │                           │
@@ -118,9 +118,11 @@ builds before it starts.
 
 **Health sensors** (optional — the terminal runs fine without them): a MAX30102
 (heart rate + SpO2) and a MAX30205 (body temperature) sharing one I2C bus —
-SDA→GPIO32, SCL→GPIO33, 3V3 from the ESP32's own rail, common ground. The
-default `Wire` pins (21/22) are unavailable: they are LCD_D2/D3. The MAX30102
-has **no temperature sensor** — that is what the MAX30205 is for. Wiring and
+SDA→GPIO21, SCL→GPIO22, 3V3 from the ESP32's own rail, common ground. These
+are the ESP32's default `Wire` pins, usable now that LCD_D2/D3 moved to
+GPIO16/17 (freed by moving the nRF link to GPIO32/33; see
+[WIRING.md §6](WIRING.md)). The MAX30102 has **no
+temperature sensor** — that is what the MAX30205 is for. Wiring and
 troubleshooting are in [WIRING.md §5](WIRING.md).
 
 ## Flashing

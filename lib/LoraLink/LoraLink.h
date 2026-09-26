@@ -23,6 +23,17 @@
 //
 // Path B is tried first. Anything that matches neither is human log noise and
 // is silently ignored - which is the whole point of the '+' prefix.
+//
+// The current nRF firmware emits BOTH for every event, back to back (it runs
+// CONFIG_LOG_MODE_IMMEDIATE, so the log line lands first and its Path B twin
+// right after). The parser drops an event identical to the one before it, so
+// each radio event reaches the application exactly once.
+//
+// The other direction is one format only, NRF_SEND_PREFIX then the text:
+//
+//     +SEND,<text>
+//
+// The nRF drops any line without the prefix (app_config.h has the reason).
 
 #include <stdint.h>
 
@@ -42,6 +53,13 @@ struct LinkEvent {
     uint8_t  src  = 0;
     int8_t   snr  = 0;
 };
+
+// True for a node's periodic beacon, "hello <seq>" (reference/nrf.cpp:483) -
+// a peer's (Rx) or our own node's (TxConfirm). The number must equal the
+// event's own seq, because the nRF stamps both from the same counter; that is
+// what keeps a real message such as "hello team" or "hello 5" from being
+// swallowed as housekeeping.
+bool isBeacon(const LinkEvent &ev);
 
 class LoraLinkParser {
 public:
@@ -66,6 +84,7 @@ private:
     uint16_t len_      = 0;
     bool     overrun_  = false;   // this line already blew the buffer
     bool     inEscape_ = false;   // mid ANSI escape sequence, dropping bytes
+    LinkEvent last_;              // previous event, to drop its Path A/B twin
     uint32_t lines_    = 0;
     uint32_t events_   = 0;
     uint32_t overruns_ = 0;
