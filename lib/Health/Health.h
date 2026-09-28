@@ -43,7 +43,9 @@ struct HealthReading {
     bool     spo2Valid = false;
     uint8_t  spo2      = 0;     // percent
     bool     tempValid = false;
-    int16_t  tempMilliC = 0;    // 36500 == 36.5 C
+    // 36500 == 36.5 C. int32, not int16: body temperature in milli-degrees
+    // is above int16's 32767, and an int16 here wrapped 36.5 C to -29.0 C.
+    int32_t  tempMilliC = 0;
     uint8_t  quality   = 0;     // 0..100, coarse; from peak count vs window
 };
 
@@ -66,8 +68,8 @@ public:
     static constexpr int32_t kIrDcFloor = 10000;
     static constexpr int32_t kIrDcCeil  = 262000;
 
-    static constexpr int16_t kTempMinMilliC = 35000;
-    static constexpr int16_t kTempMaxMilliC = 42000;
+    static constexpr int32_t kTempMinMilliC = 35000;
+    static constexpr int32_t kTempMaxMilliC = 42000;
 
     // Feed one sample pair. nowMs is the sample's arrival time.
     void push(uint32_t nowMs, int32_t red, int32_t ir);
@@ -77,7 +79,7 @@ public:
     HealthReading analyze(uint32_t nowMs) const;
 
     // Body temperature from the MAX30205, passed in verbatim.
-    void setTempMilliC(int16_t t) { tempMilliC_ = t; hasTemp_ = true; }
+    void setTempMilliC(int32_t t) { tempMilliC_ = t; hasTemp_ = true; }
 
     void reset();
     uint16_t fill() const { return fill_; }
@@ -104,7 +106,7 @@ private:
     uint16_t next_          = 0;
     uint32_t lastSampleMs_  = 0;
 
-    int16_t tempMilliC_ = 0;
+    int32_t tempMilliC_ = 0;
     bool    hasTemp_    = false;
 };
 
@@ -189,7 +191,7 @@ class Max30205 {
 public:
     bool begin(TwoWire &wire);
     bool present() const { return ok_; }
-    bool readMilliC(int16_t *out);
+    bool readMilliC(int32_t *out);
 
 private:
     TwoWire *wire_ = nullptr;
@@ -214,7 +216,7 @@ public:
     HealthReading latest(uint32_t nowMs) {
         HealthReading r = core_.analyze(nowMs);
         if (max30205Present() && nowMs - lastTempMs_ >= HEALTH_TEMP_INTERVAL_MS) {
-            int16_t t;
+            int32_t t;
             if (temp_.readMilliC(&t)) {
                 lastTempMs_ = nowMs;
                 core_.setTempMilliC(t);

@@ -71,7 +71,7 @@ TFT_eSPI reads its configuration at compile time — `static_assert`s in
 | I2C SDA → MAX30102 + MAX30205 | 21 | — | health bus — see §2.3 |
 | I2C SCL → MAX30102 + MAX30205 | 22 | — | health bus — see §2.3 |
 | MAX30102 INT | 35 | — | optional, input-only; open-drain → external pull-up |
-| *(reserved)* NEO-6M GPS NMEA in | 34 | — | UART1 RX only (`Serial1`), not yet wired — do not claim it for anything else |
+| NEO-6M GPS NMEA in | 34 | — | UART1 RX only (`Serial1`), `PIN_GPS_RX`; feeds the SHARE LOC + VITALS preset |
 
 **The assignment is forced, not chosen.** Four constraints leave almost no
 freedom:
@@ -99,9 +99,12 @@ freedom:
    can't leave it floating.
 
 That leaves nothing spare below GPIO32 — every non-strapping pin under 32 is
-now spoken for. GPIO34 is reserved for a future NEO-6M GPS module. Its NMEA
-output is all a position fix needs, so one input-only pin on UART1
-(`Serial1`) is enough.
+now spoken for. GPIO34 carries the NEO-6M GPS, on the pin reserved for it
+since the buttons came out. Its NMEA output is all a position fix needs, so
+one input-only pin on UART1 (`Serial1`) is enough, and no other pin moved.
+lib/Gps parses it (checksum-gated, so a floating pin cannot pose as a fix),
+and lib/Share turns the fix and the vitals into the two messages the SHARE
+LOC + VITALS preset sends (WIRING.md §7).
 
 Deliberately avoided: **GPIO6–11** (SPI flash, absent from this header),
 **GPIO12** (MTDI strapping — high at boot switches the flash regulator to
@@ -110,8 +113,8 @@ input pull-up).
 
 Dropping the push buttons in favour of touch is what freed 32–35, and the
 health bus spends the two clean bidirectional pins among them. Free after the
-health build: **GPIO2, 34, 36, 39** — none of them clean (2 carries the
-onboard LED and strapping, 34 has no pull-up, 36/39 are analog-only), so this
+health and GPS builds: **GPIO2, 36, 39** — none of them clean (2 carries the
+onboard LED and strapping, 36/39 are input-only with no pull-up), so this
 is a one-way door: a future peripheral needing a *reliable* I/O pin will have
 to reclaim something. The shield's SD-card slot (`D10`–`D13`) is left
 unconnected.

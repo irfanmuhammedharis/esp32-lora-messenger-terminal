@@ -24,6 +24,7 @@
 #include <lvgl.h>
 #include <Wire.h>
 
+#include "Gps.h"
 #include "Health.h"
 #include "LoraLink.h"
 #include "MessageStore.h"
@@ -39,6 +40,7 @@ static Touch         touch;
 static MessageStore  store;
 static LoraLink      nrfLink;
 static HealthSensor  health;
+static GpsReceiver   gps;
 static UI            ui;
 
 // When mesh traffic (an Rx or a Tx confirmation) was last seen. This is the
@@ -192,6 +194,11 @@ void setup() {
         Serial.println("  health ............. no sensor found - vitals disabled");
     }
 
+    // GPS is optional in the same way. There is nothing to probe - the module
+    // only talks, never answers - so presence is decided at run time by
+    // whether checksum-valid NMEA arrives, and the Status screen says which.
+    gps.begin();
+
     ui.begin(store, realSend, nullptr);
     ui.noteActivity(millis());
 
@@ -200,6 +207,8 @@ void setup() {
 
     Serial.printf("  link ............... UART%d @ %d (TX%d/RX%d)\n",
                   NRF_UART_NUM, NRF_BAUD, PIN_NRF_TX, PIN_NRF_RX);
+    Serial.printf("  gps ................ UART1 @ %d (RX%d only)\n",
+                  GPS_BAUD, PIN_GPS_RX);
     Serial.printf("  watchdog ........... %lus\n", (unsigned long)kWdtTimeoutS);
     Serial.println("-----------------------------------------------------");
 }
@@ -207,6 +216,9 @@ void setup() {
 void loop() {
     static uint32_t lastReport = 0;
     static uint32_t lastVitals = 0;
+    static uint32_t lastGps = 0;
+    static bool     lastGpsFresh = false;
+    static bool     lastGpsAlive = false;
     static LinkState lastLinkState = LinkState::Down;
 
     const uint32_t now = millis();
@@ -215,6 +227,7 @@ void loop() {
 
     nrfLink.poll(now);
     health.poll(now);
+    gps.poll(now);
 
     // Three-state link model (PLAN.md 4.1a): UART liveness is any complete
     // line within NRF_LINK_TIMEOUT_MS - beacons included, because a beacon
@@ -260,11 +273,40 @@ void loop() {
                      r.tempValid, wave, n);
     }
 
+    // GPS at 1 Hz, the module's own report rate. The UI keeps the latest fix
+    // and builds the share message from it at the moment of the tap.
+    if (now - lastGps >= 1000) {
+        lastGps = now;
+        const GpsFix &g = gps.fix();
+        ui.setGps(g);
+
+        const bool alive = gpsModuleAlive(g, now);
+        if (alive != lastGpsAlive) {
+            lastGpsAlive = alive;
+            Serial.printf("  gps module %s\n", alive ? "talking" : "SILENT");
+        }
+        const bool fresh = gpsFixFresh(g, now);
+        if (fresh != lastGpsFresh) {
+            lastGpsFresh = fresh;
+            if (fresh) {
+                char lat[16], lon[16];
+                formatCoordE6(lat, sizeof(lat), g.latE6);
+                formatCoordE6(lon, sizeof(lon), g.lonE6);
+                Serial.printf("  gps FIX %s,%s  %u sats  hdop %u.%u\n", lat, lon,
+                              g.sats, g.hdopX10 / 10, g.hdopX10 % 10);
+            } else {
+                Serial.println("  gps fix lost - share sends last known position");
+            }
+        }
+    }
+
     ui.tick(now);
     lvglPortTask();
 
     if (now - lastReport >= 30000) {
         lastReport = now;
+        const GpsFix &g = gps.fix();
+        const NmeaParser &np = gps.parser();
         Serial.printf("  t=%lus link %s msgs %u/%u queue %u/%u heap %lu B\n",
                       (unsigned long)(now / 1000),
                       st == LinkState::Up ? "UP"
@@ -272,5 +314,13 @@ void loop() {
                       store.unreadCount(), store.count(),
                       nrfLink.queueDepth(), nrfLink.queueCapacity(),
                       (unsigned long)ESP.getFreeHeap());
+        // Checksum failures climbing with no good sentences is the signature
+        // of a floating GPIO34 - no module, or its TX wire off.
+        Serial.printf("         gps %s  %u sats  nmea ok %lu bad %lu long %lu\n",
+                      gpsFixFresh(g, now)    ? "FIX"
+                      : gpsModuleAlive(g, now) ? "NOFIX" : "--",
+                      g.sats, (unsigned long)np.sentencesOk(),
+                      (unsigned long)np.checksumErrors(),
+                      (unsigned long)np.overruns());
     }
 }

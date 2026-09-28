@@ -122,7 +122,7 @@ void loop() {
     static uint32_t lastReport = 0;
     static uint32_t lastSamples = 0;
     static bool     gradedOnce = false;
-    static int16_t  tempMin = 0, tempMax = 0;
+    static int32_t  tempMin = 0, tempMax = 0;
     static bool     haveTemp = false;
 
     health.poll(now);

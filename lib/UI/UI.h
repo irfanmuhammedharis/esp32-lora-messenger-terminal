@@ -29,6 +29,7 @@
 
 #include <lvgl.h>
 
+#include "Gps.h"
 #include "LoraLink.h"
 #include "MessageStore.h"
 #include "app_config.h"
@@ -36,10 +37,11 @@
 enum class Screen : uint8_t {
     Inbox = 0,   // home: received messages, newest first
     Detail,      // one message full-screen + metadata
-    Presets,     // canned messages - the primary send path
+    Presets,     // canned messages - the primary send path - plus the
+                 // SHARE LOC + VITALS row, whose text is built at send time
     Compose,     // free text, hard 32-char limit
     Vitals,      // HR / SpO2 / temperature + PPG sparkline (read-only)
-    Status,      // link health, counters, queue depth
+    Status,      // link health, counters, queue depth, GPS fix
     Sos,         // full-screen takeover on an incoming SOS
 };
 
@@ -86,9 +88,15 @@ public:
     // a dash and the FINGER OFF / sensor-missing state instead (risk R9).
     // `wave` is the IR waveform, oldest first; the UI downsamples it into a
     // fixed sparkline buffer, so any length is accepted.
-    void setVitals(int16_t hr, int16_t spo2, int16_t tempMilliC,
+    void setVitals(int16_t hr, int16_t spo2, int32_t tempMilliC,
                    bool hrValid, bool spo2Valid, bool tempValid,
                    const int32_t *wave, uint16_t waveLen);
+
+    // The GPS fix, ~1 Hz. Like vitals, the UI only renders it and builds the
+    // share message from it - it never talks to the module. A UI that is
+    // never given a fix (Stage 5, t8, t9) shows GPS as not detected and the
+    // share preset sends "LOC NO GPS FIX".
+    void setGps(const GpsFix &fix);
 
     // Send the panic preset immediately. Bound to the persistent SOS control
     // in the footer, which is on every screen.
@@ -119,6 +127,9 @@ private:
     lv_obj_t *makeFooter(lv_obj_t *scr);
 
     void trySend(const char *text, uint32_t nowMs);
+    void trySendShare(uint32_t nowMs);
+    void addShareRow(lv_obj_t *list);
+    void refreshShareRow();
     void toast(const char *msg, uint32_t nowMs);
     void refreshVitalsStrip();
     void refreshVitalsScreen();
@@ -130,6 +141,7 @@ private:
     static void onRowClicked(lv_event_t *e);
     static void onActionClicked(lv_event_t *e);
     static void onPresetClicked(lv_event_t *e);
+    static void onShareClicked(lv_event_t *e);
     static void onComposeSend(lv_event_t *e);
     static void onComposeChanged(lv_event_t *e);
     static void onSosAck(lv_event_t *e);
@@ -160,7 +172,8 @@ private:
     // Vitals, as delivered by the health side. Values are only meaningful
     // when their valid flag is set.
     static constexpr uint16_t kVitalsWaveMax = 120;
-    int16_t vHr_ = -1, vSpo2_ = -1, vTempMilliC_ = 0;
+    int16_t vHr_ = -1, vSpo2_ = -1;
+    int32_t vTempMilliC_ = 0;
     bool    vHrOk_ = false, vSpo2Ok_ = false, vTempOk_ = false;
     bool    vitalsEver_ = false;
     int8_t  vWave_[kVitalsWaveMax] = {0};
@@ -174,6 +187,12 @@ private:
     lv_obj_t          *vitalsStateL_ = nullptr;
     lv_obj_t          *vitalsChart_ = nullptr;
     lv_chart_series_t *vitalsSer_  = nullptr;
+
+    // GPS, as delivered by the receiver, and the share row's status line,
+    // which setGps() rewrites in place so an operator waiting on the Presets
+    // screen sees the fix arrive.
+    GpsFix    gps_;
+    lv_obj_t *shareSubL_ = nullptr;
 
     char     toastMsg_[32] = {0};
     uint32_t toastUntil_   = 0;

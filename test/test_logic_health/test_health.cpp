@@ -218,7 +218,20 @@ static void test_temperature_gate(void) {
     c.setTempMilliC(36500);   // 36.5 C: plausible body temperature
     r = c.analyze(HealthCore::kWindow * 10);
     TEST_ASSERT_TRUE(r.tempValid);
-    TEST_ASSERT_EQUAL_INT16(36500, r.tempMilliC);
+    TEST_ASSERT_EQUAL_INT32(36500, r.tempMilliC);
+
+    // The top of the gate. 42 C is above int16's range in milli-degrees, so
+    // this is also the regression check for the type: an int16 field wrapped
+    // it negative, and the old EQUAL_INT16 assert above wrapped the expected
+    // value the same way and passed anyway.
+    c.setTempMilliC(42000);
+    r = c.analyze(HealthCore::kWindow * 10);
+    TEST_ASSERT_TRUE(r.tempValid);
+    TEST_ASSERT_EQUAL_INT32(42000, r.tempMilliC);
+
+    c.setTempMilliC(42100);   // 42.1 C: past what a living body reads
+    r = c.analyze(HealthCore::kWindow * 10);
+    TEST_ASSERT_FALSE(r.tempValid);
 }
 
 // ── Wave access for the UI sparkline ────────────────────────────────────────

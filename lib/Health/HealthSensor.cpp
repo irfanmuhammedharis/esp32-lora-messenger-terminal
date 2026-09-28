@@ -131,14 +131,14 @@ bool Max30205::begin(TwoWire &wire) {
     wire_->write(Max30205Regs::kConfigCont);
     if (wire_->endTransmission(true) != 0) return false;
 
-    int16_t t;
+    int32_t t;
     if (!readMilliC(&t)) return false;
 
     ok_ = true;
     return true;
 }
 
-bool Max30205::readMilliC(int16_t *out) {
+bool Max30205::readMilliC(int32_t *out) {
     wire_->beginTransmission(0x48);
     wire_->write(Max30205Regs::kTemperature);
     if (wire_->endTransmission(false) != 0) return false;
@@ -148,7 +148,7 @@ bool Max30205::readMilliC(int16_t *out) {
     const uint8_t lo = wire_->read();
     const int16_t raw = (int16_t)((uint16_t)(hi << 8) | lo);
     const double celsius = raw * Max30205Regs::kLsbCelsius;
-    *out = (int16_t)(celsius * 1000.0);   // milli-degrees, rounded
+    *out = (int32_t)(celsius * 1000.0);   // milli-degrees
     return true;
 }
 

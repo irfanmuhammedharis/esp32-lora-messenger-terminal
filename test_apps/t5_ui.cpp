@@ -102,6 +102,39 @@ static void mockVitals(uint32_t nowMs) {
     ui.setVitals(72, 98, 36600, true, true, true, wave, 200);
 }
 
+// Synthetic GPS, ~1 Hz, walking the share row through every state it can
+// show on a 60 s cycle: not detected, searching, a live fix, then the fix
+// lost (so SHARE LOC + VITALS sends a LAST line). No module involved.
+static void mockGps(uint32_t nowMs) {
+    static uint32_t next = 1000;
+    static GpsFix g;
+    if (nowMs < next) return;
+    next = nowMs + 1000;
+
+    const uint32_t t = (nowMs / 1000) % 60;
+    if (t < 10) return;                     // silent: "not detected" on the
+                                            // first cycle, "last fix" after
+
+    g.heard = true;
+    g.lastSentenceMs = nowMs;
+    if (t < 20) {                           // talking, no fix yet
+        g.live = false;
+        g.sats = 3;
+    } else if (t < 50) {                    // live fix
+        g.hasPos = true;
+        g.live   = true;
+        g.latE6  = 10527642;                // 10.527642 N
+        g.lonE6  = 76214435;                // 76.214435 E
+        g.fixMs  = nowMs;
+        g.sats   = 8;
+        g.hdopX10 = 9;
+    } else {                                // fix lost, position kept
+        g.live = false;
+        g.sats = 2;
+    }
+    ui.setGps(g);
+}
+
 void setup() {
     Serial.begin(115200);
     delay(400);
@@ -151,6 +184,8 @@ void setup() {
     Serial.println("  BACK is bottom-right everywhere except the inbox.");
     Serial.println("  A fake message arrives every 7 s; one of them is an SOS.");
     Serial.println("  VITALS row + inbox strip run on fake vitals (72 bpm).");
+    Serial.println("  Fake GPS cycles none/searching/fix/lost every 60 s -");
+    Serial.println("  watch the SHARE LOC + VITALS row under SOS in PRESETS.");
     Serial.println("-----------------------------------------------------");
 }
 
@@ -160,6 +195,7 @@ void loop() {
 
     mockGenerator(now);
     mockVitals(now);
+    mockGps(now);
     ui.tick(now);
     lvglPortTask();
 

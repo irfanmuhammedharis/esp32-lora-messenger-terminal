@@ -32,8 +32,8 @@
 // use. The nRF link sat there for a while and blocked both, so it moved to
 // GPIO32/33 (see the UART section below).
 //
-// Still free: GPIO 2, 34, 36, 39 (34/36/39 input-only). GPIO34 is earmarked
-// for a future NEO-6M GPS - see the Input section below.
+// Still free: GPIO 2, 36, 39 (36/39 input-only). GPIO34 now carries the
+// NEO-6M GPS - see the GPS section below.
 
 // ── Display: 8-bit parallel data bus ────────────────────────────────────────
 // NOTE the crossover: the shield's D8/D9 header pins carry LCD_D0/LCD_D1,
@@ -81,16 +81,19 @@
 // itself and fired a panic SOS. See PLAN.md section 5.
 //
 // Free as a result: GPIO32, 33, 34, 35 (32/33 fully bidirectional). GPIO35 is
-// still spoken for below (PIN_MAX30102_INT), and GPIO32/33 now carry the nRF
-// link (UART section below).
-//
-// GPIO34 is reserved for a future NEO-6M GPS module - do not claim it for
-// anything else. A GPS only needs its NMEA output wire to report position, so
-// one input-only pin on UART1 is enough:
-// `Serial1.begin(9600, SERIAL_8N1, PIN_GPS_RX, -1)`. Noise while no module is
-// fitted is harmless, because every NMEA sentence carries a checksum.
+// still spoken for below (PIN_MAX30102_INT), GPIO32/33 now carry the nRF
+// link (UART section below), and GPIO34 the GPS (next section).
+
+// ── UART1 from the NEO-6M GPS (receive only) ────────────────────────────────
+// The pin reserved for this since the buttons came out; nothing else moved to
+// make room. A GPS only needs its NMEA output wire to report position, so one
+// input-only pin is enough: GpsReceiver::begin() runs
+// `Serial1.begin(9600, SERIAL_8N1, PIN_GPS_RX, -1)`. GPIO34 has no internal
+// pull-up, so it floats while no module is fitted - harmless, because every
+// NMEA sentence carries a checksum and lib/Gps drops any that fails it.
 // Configuring the module (ESP32 -> GPS RX) would need an output pin, and none
-// is left. Not yet in use, so no PIN_GPS_* defines exist here yet.
+// is left; the module's power-up defaults are all this needs.
+#define PIN_GPS_RX      34   // ESP32 RX  <-  NEO-6M TX
 
 // ── UART2 link to the nRF52840 (cross-wired, plus a common ground) ──────────
 // GPIO32/33, not TX0/RX0: those are hard-wired to the USB-serial bridge, and

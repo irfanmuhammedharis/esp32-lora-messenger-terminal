@@ -73,6 +73,30 @@
 // be a lie (PLAN.md risk R10).
 #define HEALTH_STALE_MS        3000
 
+// ── GPS (NEO-6M on UART1, receive only) ─────────────────────────────────────
+// The module's power-up default. There is no TX wire to change it with.
+#define GPS_BAUD               9600
+
+// NMEA 0183 caps a sentence at 82 characters including '$' and CRLF. The
+// margin keeps a slightly over-long sentence from another talker counting as
+// an overrun; anything past it is dropped whole, never half-parsed.
+#define GPS_LINE_MAX           96
+
+// UART1 receive buffer. A NEO-6M sends ~500 bytes of NMEA a second; the
+// Arduino default of 256 is only a quarter-second at 9600 baud, which a slow
+// screen rebuild can outlast.
+#define GPS_RX_BUFFER          1024
+
+// A position older than this is no longer "here". The module reports once a
+// second, so this is five missed reports - a module unplugged or wedged, not
+// a sentence lost to noise. Losing the fix itself is reported at once by the
+// module (RMC status V) and does not wait for this.
+#define GPS_FIX_STALE_MS       5000
+
+// No checksum-valid sentence for this long means no module is talking. A
+// NEO-6M sends every second with or without a fix.
+#define GPS_SILENT_MS          3000
+
 // ── Touch (4-wire resistive, no controller, shares the LCD bus) ─────────────
 // The panel is a bare resistive sheet: reading it means driving two of the
 // four corners and measuring the voltage the divider produces at a third.
@@ -185,6 +209,10 @@
 // because dropping the push buttons removed the out-of-band panic path that
 // used to be a long press on OK (PLAN.md risk R4e).
 #define PRESET_SOS_INDEX    0
+
+// The SHARE LOC + VITALS row on the Presets screen is deliberately not in
+// this table: its text is built at the moment of sending, from the GPS fix
+// and the vitals (lib/Share), and test/test_logic_gps holds it to MSG_MAX_LEN.
 
 static const char* const kPresetMessages[] = {
     "SOS",

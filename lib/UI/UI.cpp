@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "Share.h"
 #include "lvgl_port.h"
 
 // ── Layout, in pixels, for the panel's native 240x320 portrait ──────────────
@@ -33,6 +34,7 @@ static constexpr uint32_t kFooterBg  = 0x1e293b;
 static constexpr uint32_t kRowBg     = 0x1a2230;
 static constexpr uint32_t kRowAlert  = 0x7f1d1d;
 static constexpr uint32_t kRowAction = 0x1d4ed8;
+static constexpr uint32_t kRowShare  = 0x115e59;
 static constexpr uint32_t kPressed   = 0x2563eb;
 static constexpr uint32_t kTextDim   = 0x94a3b8;
 static constexpr uint32_t kTextBlue  = 0x7dd3fc;
@@ -113,6 +115,29 @@ static uint32_t linkStateColour(LinkState s) {
         case LinkState::Searching: return kTextWarn;
         case LinkState::Up:        return 0x86efac;
     }
+    return kTextDim;
+}
+
+// GPS state in a few words, shared by the share row and the Status screen so
+// the two can never describe the same fix differently. Amber for "usable but
+// not live", like SEARCHING on the link: a missing fix is a sky-view
+// condition, not a fault.
+static uint32_t gpsState(const GpsFix &g, uint32_t nowMs, char *buf, size_t n) {
+    if (gpsFixFresh(g, nowMs)) {
+        snprintf(buf, n, "FIX, %u sats", g.sats);
+        return 0x86efac;
+    }
+    if (g.hasPos) {
+        char age[12];
+        formatAge(age, sizeof(age), nowMs - gpsFixAgeMs(g, nowMs), nowMs);
+        snprintf(buf, n, "last fix %s ago", age);
+        return kTextWarn;
+    }
+    if (gpsModuleAlive(g, nowMs)) {
+        snprintf(buf, n, "searching, %u sats", g.sats);
+        return kTextWarn;
+    }
+    snprintf(buf, n, "not detected");
     return kTextDim;
 }
 
@@ -246,6 +271,7 @@ void UI::show(Screen s) {
     hdrVitals_ = vitalsHrL_ = vitalsSpo2L_ = vitalsTempL_ = nullptr;
     vitalsStateL_ = vitalsChart_ = nullptr;
     vitalsSer_ = nullptr;
+    shareSubL_ = nullptr;
 
     switch (s) {
         case Screen::Inbox:   buildInbox();   break;
@@ -485,9 +511,49 @@ void UI::buildPresets() {
         lv_obj_add_event_cb(btn, onPresetClicked, LV_EVENT_CLICKED, this);
         lv_obj_set_user_data(btn, reinterpret_cast<void *>(
                                       static_cast<uintptr_t>(i)));
+
+        // Location sharing sits directly under SOS: after "help", "here is
+        // where I am" is the message most likely to be needed in a hurry, so
+        // it must be on the first screenful, never behind a scroll.
+        if (i == PRESET_SOS_INDEX) addShareRow(list);
     }
 
     makeFooter(scr_);
+}
+
+// The one preset whose text does not exist until it is tapped. It sends two
+// messages - position, then vitals (lib/Share has why it is two) - and wears
+// a second line saying what the GPS can offer right now, because the operator
+// needs to know whether they are about to send a live fix BEFORE they tap,
+// not from a toast afterwards.
+void UI::addShareRow(lv_obj_t *list) {
+    lv_obj_t *btn = lv_list_add_button(list, nullptr, nullptr);
+    lv_obj_set_size(btn, LV_PCT(100), kRowH);
+    stripStyle(btn);
+    lv_obj_set_style_pad_hor(btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(kRowShare), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(kPressed),
+                              LV_PART_MAIN | LV_STATE_PRESSED);
+
+    lv_obj_t *t = label(btn, "SHARE LOC + VITALS", &lv_font_montserrat_16,
+                        0xffffff);
+    lv_obj_align(t, LV_ALIGN_TOP_LEFT, 0, 3);
+
+    shareSubL_ = label(btn, "", &lv_font_montserrat_14, kTextDim);
+    lv_obj_align(shareSubL_, LV_ALIGN_BOTTOM_LEFT, 0, -4);
+    refreshShareRow();
+
+    lv_obj_add_event_cb(btn, onShareClicked, LV_EVENT_CLICKED, this);
+}
+
+void UI::refreshShareRow() {
+    if (!shareSubL_) return;
+    char state[32], buf[40];
+    const uint32_t colour = gpsState(gps_, lv_tick_get(), state, sizeof(state));
+    snprintf(buf, sizeof(buf), "GPS %s", state);
+    lv_label_set_text(shareSubL_, buf);
+    lv_obj_set_style_text_color(shareSubL_, lv_color_hex(colour), LV_PART_MAIN);
 }
 
 // ── Compose ─────────────────────────────────────────────────────────────────
@@ -639,6 +705,21 @@ void UI::buildStatus() {
     lv_bar_set_range(bar, 0, qCap_ ? qCap_ : 1);
     lv_bar_set_value(bar, qDepth_, LV_ANIM_OFF);
 
+    // GPS: the state, then exactly the location line SHARE LOC + VITALS would
+    // send right now - so "what will the far end see" is answered here
+    // without transmitting anything to find out.
+    const uint32_t now = lv_tick_get();
+    char state[32];
+    const uint32_t gcol = gpsState(gps_, now, state, sizeof(state));
+    snprintf(buf, sizeof(buf), "gps .......... %s", state);
+    label(body, buf, &lv_font_montserrat_14, gcol);
+
+    char loc[MSG_MAX_LEN + 1];
+    formatLocationMsg(loc, sizeof(loc), gps_, now);
+    lv_obj_t *locL = label(body, loc, &lv_font_montserrat_14, kTextDim);
+    lv_obj_set_width(locL, LV_PCT(100));
+    lv_label_set_long_mode(locL, LV_LABEL_LONG_MODE_WRAP);
+
     makeFooter(scr_);
 }
 
@@ -729,6 +810,11 @@ void UI::onPresetClicked(lv_event_t *e) {
     if (i < kPresetCount) ui->trySend(kPresetMessages[i], lv_tick_get());
 }
 
+void UI::onShareClicked(lv_event_t *e) {
+    UI *ui = static_cast<UI *>(lv_event_get_user_data(e));
+    ui->trySendShare(lv_tick_get());
+}
+
 void UI::onComposeChanged(lv_event_t *e) {
     UI *ui = static_cast<UI *>(lv_event_get_user_data(e));
     if (!ui->composeTa_ || !ui->composeCnt_) return;
@@ -783,6 +869,39 @@ void UI::trySend(const char *text, uint32_t nowMs) {
     if (ok) show(Screen::Inbox);
 }
 
+void UI::trySendShare(uint32_t nowMs) {
+    char loc[MSG_MAX_LEN + 1], vit[MSG_MAX_LEN + 1];
+    formatLocationMsg(loc, sizeof(loc), gps_, nowMs);
+    // The vitals exactly as the strip and the Vitals screen show them: a
+    // value HealthCore's gate rejected goes out as "--", never as a number.
+    formatVitalsMsg(vit, sizeof(vit),
+                    vitalsEver_ && vHrOk_, vHr_,
+                    vitalsEver_ && vSpo2Ok_, vSpo2_,
+                    vitalsEver_ && vTempOk_, vTempMilliC_);
+
+    // Both or neither, where that can be known up front: a position that
+    // goes out without the vitals it was sent with is the less useful half,
+    // so a queue without room for two refuses the pair rather than sending
+    // one and discovering the other has nowhere to go.
+    if (!sendFn_ || qDepth_ + 2 > qCap_) {
+        toast("SEND FAILED - queue full", nowMs);
+        return;
+    }
+
+    const bool locOk = sendFn_(loc, user_);
+    const bool vitOk = locOk && sendFn_(vit, user_);
+
+    // Worded so the operator knows what kind of position went: a stale or
+    // missing fix is sent anyway (lib/Share says why), but never silently.
+    if (!locOk)      toast("SEND FAILED - queue full", nowMs);
+    else if (!vitOk) toast("VITALS FAILED - queue full", nowMs);
+    else if (gpsFixFresh(gps_, nowMs)) toast("location queued", nowMs);
+    else if (gps_.hasPos)              toast("old fix queued", nowMs);
+    else                               toast("queued, NO FIX", nowMs);
+
+    if (locOk) show(Screen::Inbox);
+}
+
 void UI::sendPanicSos(uint32_t nowMs) {
     trySend(kPresetMessages[PRESET_SOS_INDEX], nowMs);
 }
@@ -827,7 +946,14 @@ void UI::setParserStats(uint32_t lines, uint32_t events, uint32_t overruns) {
     pOverruns_ = overruns;
 }
 
-void UI::setVitals(int16_t hr, int16_t spo2, int16_t tempMilliC,
+void UI::setGps(const GpsFix &fix) {
+    gps_ = fix;
+    // Only the share row updates live. The Status screen, like every other
+    // value on it, is a snapshot taken when it was opened.
+    refreshShareRow();
+}
+
+void UI::setVitals(int16_t hr, int16_t spo2, int32_t tempMilliC,
                    bool hrValid, bool spo2Valid, bool tempValid,
                    const int32_t *wave, uint16_t waveLen) {
     vHr_ = hr;

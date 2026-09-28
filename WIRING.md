@@ -159,8 +159,8 @@ but they can be removed.
 
 Freed by this change: **GPIO32, 33, 34, 35** — 32 and 33 are fully
 bidirectional. GPIO35 is spoken for (section 5, MAX30102 INT), GPIO32/33
-carry the nRF link (section 6), and GPIO34 is **reserved for a future NEO-6M
-GPS module**, see section 7.
+carry the nRF link (section 6), and GPIO34 carries the **NEO-6M GPS**, see
+section 7.
 
 ---
 
@@ -269,11 +269,12 @@ That is correct operation, not a symptom to chase.
 
 ---
 
-## 7. Future expansion — NEO-6M GPS (reserved, not wired)
+## 7. NEO-6M GPS — 3 wires
 
-Not part of the current build. GPIO34 is held in reserve so nothing else
-claims it first. (This reservation was GPIO32/33 until the nRF link needed
-them, §6.)
+Feeds the **SHARE LOC + VITALS** preset (second row on the Presets screen,
+under SOS) and the `gps` lines on the Status screen. GPIO34 was held in
+reserve for exactly this, so **no existing pin moved** to fit it. (The
+reservation was GPIO32/33 until the nRF link needed them, §6.)
 
 ```
    NEO-6M GPS module                       ESP32 DevKit V1
@@ -294,12 +295,28 @@ carry a checksum, so noise with no module fitted is rejected. It gets its own
 peripheral, UART1, untouched by anything else in the project:
 
 ```cpp
-Serial1.begin(9600, SERIAL_8N1, /*rx=*/34, /*tx=*/-1);
+Serial1.begin(GPS_BAUD, SERIAL_8N1, PIN_GPS_RX, -1);   // GpsReceiver::begin()
 ```
 
-Like every other GPIO, once this module is actually wired its pin belongs in
-[include/pins.h](include/pins.h) as `PIN_GPS_RX`, not hardcoded at the call
-site.
+The pin is `PIN_GPS_RX` in [include/pins.h](include/pins.h). The module is
+optional in the same way as the health sensors: with it unplugged the
+terminal runs normally, the Status screen reads `gps .... not detected`, and
+the share preset sends `LOC NO GPS FIX` along with the vitals.
+
+**First fix needs sky.** A cold NEO-6M can take 30 s to several minutes to
+get a fix, and usually will not get one indoors. The module's own LED blinks
+once a second when it has a fix. While it is searching, the share row reads
+`GPS searching, N sats`. After a fix is lost it reads `GPS last fix Xm ago`,
+and the preset then sends `LAST <lat>,<lon> <age>` instead of `LOC …`, so the
+far end never takes an old position for a live one.
+
+**What goes on air** — two messages, because one would not fit the radio's
+32-character cap ([lib/Share/Share.h](lib/Share/Share.h)):
+
+```
+LOC 10.52764,76.21444        or  LAST 10.52764,76.21444 4m  /  LOC NO GPS FIX
+HR 72 SPO2 98% T 36.6C       "--" for any value the sensor could not vouch for
+```
 
 ---
 
@@ -316,6 +333,7 @@ staged workflow in [PLAN.md](PLAN.md) §5.
 | **3** touch in LVGL | *nothing* — no input hardware at all | 15 wires |
 | **4** nRF link | TX, RX, GND | 18 wires |
 | **4a** health bring-up | SDA, SCL, 3V3, GND (+1 INT later) | 19 wires |
+| **GPS** NEO-6M | TX → GPIO34, VCC → 3V3, GND | 20 wires |
 
 ```bash
 pio run -e t1a_lcdid -t upload && pio device monitor   # then set the driver
@@ -343,5 +361,7 @@ pio run -e t1_display -t upload
 | I2C scan finds 0x57 but `REV_ID` ≠ 0x15 | Knockoff or different chip behind the MAX30102 silkscreen | Trust the scan, not the label; treat unknown parts as unsupported |
 | MAX30205 reads a fixed or out-of-range value | Stuck temperature register, or address collision | Check A0–A2 are low (0x48); rescan (§5) |
 | Won't enter download mode | Something holding GPIO5 or GPIO15 low at boot | Both are strapping pins; unplug the shield and retry |
+| Status says `gps .... not detected` with the module fitted | Module TX not on GPIO34, or GPS RX wired instead of TX, or no common GND | Module **TX** → GPIO34 (§7). The serial report's `nmea bad` count climbing while `ok` stays 0 means the pin is floating |
+| `GPS searching` for minutes | No sky view, or a cold start | Take it outdoors; a cold NEO-6M can take several minutes. The satellite count on the share row should climb |
 | Link indicator stuck on `LINK DOWN` | UART wiring fault, or nRF console still on USB CDC | Recheck TX↔RX cross and common GND (§6); confirm the nRF build moved the console off USB CDC (PLAN.md §3.3) |
 | Link indicator stuck on `SEARCHING FOR NETWORK` | Wiring is fine — no peer node in range | Not a wiring fault; bring a second mesh node in range (§6) |
